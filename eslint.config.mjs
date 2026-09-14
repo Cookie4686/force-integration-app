@@ -1,9 +1,13 @@
+import { includeIgnoreFile } from "@eslint/compat";
 import js from "@eslint/js";
 import nextVitals from "eslint-config-next/core-web-vitals";
 import nextTs from "eslint-config-next/typescript";
 import eslintConfigPrettier from "eslint-config-prettier";
 import perfectionist from "eslint-plugin-perfectionist";
 import { defineConfig, globalIgnores } from "eslint/config";
+import { fileURLToPath } from "node:url";
+
+const gitignorePath = fileURLToPath(new URL(".gitignore", import.meta.url));
 
 const eslintConfig = defineConfig([
 	...nextVitals,
@@ -30,6 +34,7 @@ const eslintConfig = defineConfig([
 		"build/**",
 		"next-env.d.ts",
 	]),
+	includeIgnoreFile(gitignorePath, "Imported .gitignore patterns"),
 ]);
 
 export default eslintConfig;
