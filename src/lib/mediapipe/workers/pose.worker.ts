@@ -4,7 +4,8 @@ import { FilesetResolver, PoseLandmarker, PoseLandmarkerOptions, PoseLandmarkerR
 import * as Comlink from "comlink";
 
 export interface PoseLandmarkerWorker {
-	initialize(options: PoseLandmarkerOptions): Promise<void>;
+	initialize(options: PoseLandmarkerOptions): Promise<{ loadingTime: number } | null>;
+	setOptions(options: PoseLandmarkerOptions): Promise<{ loadingTime: number } | null>;
 	detect(imageBitmap: ImageBitmap): {
 		inferenceTime: number;
 		result: PoseLandmarkerResult;
@@ -16,27 +17,48 @@ let isInitializing: boolean = false;
 
 const api: PoseLandmarkerWorker = {
 	async initialize(options) {
-		if (poseLandmarker === null) {
-			isInitializing = true;
-			const vision = await FilesetResolver.forVisionTasks(
-				// path/to/wasm/root
-				"/wasm"
-			);
-			poseLandmarker = await PoseLandmarker.createFromOptions(vision, options);
-		}
+		if (poseLandmarker !== null) return null;
+
+		isInitializing = true;
+
+		const startTimeMs = performance.now();
+		const vision = await FilesetResolver.forVisionTasks(
+			// path/to/wasm/root
+			"/wasm"
+		);
+		poseLandmarker = await PoseLandmarker.createFromOptions(vision, options);
+		const inferenceTime = performance.now() - startTimeMs;
+
+		isInitializing = false;
+
+		return { loadingTime: inferenceTime };
 	},
 
-	detect(imageBitmap) {
-		const startTimeMs = performance.now();
-
-		if (!poseLandmarker) {
-			if (isInitializing == false) console.error("Initialize the worker before using worker methods");
+	async setOptions(options) {
+		if (isInitializing || !poseLandmarker) {
 			return null;
 		}
 
-		const result = poseLandmarker.detect(imageBitmap);
+		isInitializing = true;
 
+		const startTimeMs = performance.now();
+		await poseLandmarker.setOptions(options);
 		const inferenceTime = performance.now() - startTimeMs;
+
+		isInitializing = false;
+
+		return { loadingTime: inferenceTime };
+	},
+
+	detect(imageBitmap) {
+		if (isInitializing || !poseLandmarker) {
+			return null;
+		}
+
+		const startTimeMs = performance.now();
+		const result = poseLandmarker.detect(imageBitmap);
+		const inferenceTime = performance.now() - startTimeMs;
+
 		imageBitmap.close();
 
 		return {
