@@ -1,37 +1,54 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { PoseLandmarkerOptions } from "@mediapipe/tasks-vision";
+import { useEffect, useState } from "react";
 
-import { Input } from "@/components/ui/input";
+import useDebounce from "@/hooks/use-debounce";
 import useMediapipePose from "@/hooks/use-mediapipe-pose";
 
-import PageMrcSectionImage from "./image-section";
+import PageToolPoseSectionConfig from "./config-section";
+import PageToolPoseSectionImage from "./image-section";
+
+const initOptions: PoseLandmarkerOptions = {
+	baseOptions: {
+		modelAssetPath: "/pose/model/pose_landmarker_lite.task",
+		delegate: "GPU",
+	},
+	runningMode: "IMAGE",
+	numPoses: 4,
+	outputSegmentationMasks: false,
+};
 
 export default function PageToolPose() {
-	const mediapipePose = useMediapipePose({
-		baseOptions: {
-			modelAssetPath: "/pose/model/pose_landmarker_lite.task",
-			delegate: "GPU",
-		},
-		runningMode: "IMAGE",
-		numPoses: 4,
-		outputSegmentationMasks: false,
-	});
+	const mediapipePose = useMediapipePose(initOptions);
+	const { modelStatus } = mediapipePose.states;
+	const { updateOptions } = mediapipePose.actions;
 
-	const inputRef = useRef<HTMLInputElement>(null);
-	const [file, setFile] = useState<File | null>(null);
+	const [imageFile, setImageFile] = useState<File | null>(null);
 
-	const onInputFileChange: React.ChangeEventHandler<HTMLInputElement> = (e) => {
-		const file = e.target.files?.[0];
-		if (file) {
-			setFile(file);
-		}
-	};
+	const [options, setOptions] = useState(initOptions);
+	const debouncedOptions = useDebounce(options, 500);
+
+	useEffect(() => {
+		updateOptions(debouncedOptions);
+
+		// update model option
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [debouncedOptions]);
 
 	return (
-		<div className="rounded border p-2">
-			<PageMrcSectionImage mediapipePose={mediapipePose} imageFile={file} />
-			<Input className="cursor-pointer" onChange={onInputFileChange} type="file" accept="image/*" ref={inputRef} />
+		<div className="flex justify-between p-2">
+			<div className="rounded border p-2">
+				<PageToolPoseSectionImage mediapipePose={mediapipePose} imageFile={imageFile} />
+			</div>
+			<div className="w-xs rounded border p-2">
+				<PageToolPoseSectionConfig
+					initOption={initOptions}
+					setOptionAction={setOptions}
+					setImageFileAction={setImageFile}
+					modelStatus={modelStatus}
+				/>
+			</div>
 		</div>
 	);
 }
