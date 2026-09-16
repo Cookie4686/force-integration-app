@@ -8,7 +8,7 @@ import {
 	PoseLandmarkerResult,
 } from "@mediapipe/tasks-vision";
 import * as Comlink from "comlink";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { PoseLandmarkerWorker } from "@/lib/mediapipe/workers/pose.worker";
 
@@ -20,15 +20,40 @@ export type ModelStatus = {
 	inferenceTime?: number;
 };
 
+export type ModelType = "lite" | "full" | "heavy";
+
+export type ModelOption = Omit<PoseLandmarkerOptions, "baseOptions"> & {
+	type: ModelType;
+	delegate: "CPU" | "GPU";
+};
+
 const WORKER_FILE_PATH = "/workers/pose.worker.js";
 
-export default function useMediapipePose(initOptions: PoseLandmarkerOptions) {
+const parseOptions = ({ type, delegate, ...options }: ModelOption): PoseLandmarkerOptions => {
+	const modelAssetPath =
+		type === "lite" ? "/pose/model/pose_landmarker_lite.task"
+		: type === "full" ? "/pose/model/pose_landmarker_full.task"
+		: "/pose/model/pose_landmarker_heavy.task";
+
+	return {
+		baseOptions: {
+			delegate,
+			modelAssetPath,
+		},
+		...options,
+	};
+};
+
+export default function useMediapipePose(initOptions: ModelOption) {
 	const lastResultRef = useRef<PoseLandmarkerResult>(null);
 
 	// IMAGE, CANVAS, SKELETAL DISPLAY RELATED FUNCTION
 	const imageRef = useRef<HTMLImageElement | null>(null);
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const focusPointRef = useRef<FocusPoint | null>(null);
+	const focusPointRadiusRef = useRef<number>(128);
+	const [focusPointRadius, setFocusPointRadius] = useState<number>(128);
+	const [maxFocusPointRadius, setMaxFocusPointRadius] = useState<number>(128);
 
 	const displayImageResult = (result: PoseLandmarkerResult): void => {
 		if (canvasRef.current === null || imageRef.current === null) return;
@@ -56,10 +81,11 @@ export default function useMediapipePose(initOptions: PoseLandmarkerOptions) {
 				let minDistance: number | null = null;
 
 				for (const landmark of result.landmarks) {
-					const distance =
-						(landmark[0].x - focusPointRef.current.x / canvasRef.current.clientWidth) ** 2
-						+ (landmark[0].y - focusPointRef.current.y / canvasRef.current.clientHeight) ** 2;
-					if (minDistance === null || distance < minDistance) {
+					const distance = Math.sqrt(
+						(landmark[0].x * canvasRef.current.clientWidth - focusPointRef.current.x) ** 2
+							+ (landmark[0].y * canvasRef.current.clientHeight - focusPointRef.current.y) ** 2
+					);
+					if (distance <= focusPointRadiusRef.current && (minDistance === null || distance < minDistance)) {
 						minDistance = distance;
 						targetLandmark = [landmark];
 					}
@@ -79,11 +105,11 @@ export default function useMediapipePose(initOptions: PoseLandmarkerOptions) {
 
 	// --- MODEL RELATED FUNCTION ---
 
-	const [modelStatus, setModelStatus] = useState<ModelStatus>({ state: "load" });
+	const [modelStatus, dispatchModelStatus] = useReducer(modelStatusReducer, { state: "load" });
 	const poseWorkerRef = useRef<Comlink.Remote<PoseLandmarkerWorker>>(null);
 	const isModelReadyRef = useRef<boolean>(false);
 
-	const detectImageAndDisplayResult = async () => {
+	const detectImageAndDisplayResult = useCallback(async () => {
 		if (
 			poseWorkerRef.current === null
 			|| !isModelReadyRef.current
@@ -93,13 +119,23 @@ export default function useMediapipePose(initOptions: PoseLandmarkerOptions) {
 		)
 			return;
 
-		setModelStatus((prev) => ({ ...prev, state: "inference" }));
+		dispatchModelStatus({ state: "inferencing" });
 		const response = await poseWorkerRef.current.detect(await window.createImageBitmap(imageRef.current));
-		setModelStatus((prev) => ({ ...prev, state: "idle", inferenceTime: response?.inferenceTime }));
 
-		if (response !== null) {
+		if (response === null) {
+			dispatchModelStatus({ state: "error" });
+		} else {
+			dispatchModelStatus({ state: "inference_finished", inferenceTime: response.inferenceTime });
 			lastResultRef.current = response.result;
 			displayImageResult(response.result);
+		}
+	}, []);
+
+	const redrawResult = async (forceRerender: boolean = false) => {
+		if (forceRerender || lastResultRef.current === null) {
+			await detectImageAndDisplayResult();
+		} else {
+			displayImageResult(lastResultRef.current);
 		}
 	};
 
@@ -109,52 +145,53 @@ export default function useMediapipePose(initOptions: PoseLandmarkerOptions) {
 			if (poseWorkerRef.current !== null) return;
 
 			poseWorkerRef.current = Comlink.wrap<PoseLandmarkerWorker>(new Worker(WORKER_FILE_PATH));
-			const response = await poseWorkerRef.current.initialize(initOptions);
+
+			dispatchModelStatus({ state: "loading" });
+
+			const response = await poseWorkerRef.current.initialize(parseOptions(initOptions));
 
 			// TODO: add error checking and handling
 			if (response === null) {
-				setModelStatus((prev) => ({ ...prev, state: "error" }));
+				dispatchModelStatus({ state: "error" });
 			} else {
 				isModelReadyRef.current = true;
-				setModelStatus((prev) => ({ ...prev, state: "idle", loadTime: response.loadingTime }));
+				dispatchModelStatus({ state: "load_finished", loadTime: response.loadingTime });
 				await detectImageAndDisplayResult();
 			}
 		};
 		loadModel();
 		// load model only once the page renders
+		// TODO: can we change to on mount or something because I hate use effect
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	// Update Model Options
-	// TODO: add model enum type to this function or something and point to the model public path
-	const updateOptions = async (options: PoseLandmarkerOptions): Promise<void> => {
-		if (poseWorkerRef.current === null) return;
+	const updateOptions = useCallback(
+		async (options: ModelOption): Promise<void> => {
+			if (poseWorkerRef.current === null) return;
 
-		isModelReadyRef.current = false;
-		setModelStatus((prev) => ({ ...prev, state: "load" }));
-		const response = await poseWorkerRef.current.setOptions(options);
-		if (response === null) {
-			// TODO: add error checking and handling
-			setModelStatus((prev) => ({ ...prev, state: "error" }));
-		} else {
-			isModelReadyRef.current = true;
-			setModelStatus((prev) => ({ ...prev, state: "idle", loadTime: response.loadingTime }));
-			await detectImageAndDisplayResult();
-		}
-	};
+			isModelReadyRef.current = false;
+			dispatchModelStatus({ state: "configuring" });
+
+			const response = await poseWorkerRef.current.setOptions(parseOptions(options));
+			if (response === null) {
+				// TODO: add error checking and handling
+				dispatchModelStatus({ state: "error" });
+			} else {
+				isModelReadyRef.current = true;
+				dispatchModelStatus({ state: "configure_finished", configureTime: response.loadingTime });
+				await detectImageAndDisplayResult();
+			}
+		},
+		[detectImageAndDisplayResult]
+	);
 
 	// --- FOCUS POINT RELATED FUNCTION ---
 	const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null);
 
-	const updateFocusPoint = async (focusPoint: typeof focusPointRef.current, forceRerender: boolean = false) => {
+	const updateFocusPoint = async (focusPoint: typeof focusPointRef.current) => {
 		focusPointRef.current = focusPoint;
 		setFocusPoint(focusPoint);
-
-		if (forceRerender || lastResultRef.current === null) {
-			await detectImageAndDisplayResult();
-		} else {
-			displayImageResult(lastResultRef.current);
-		}
 	};
 
 	const handleCanvasClick: React.MouseEventHandler<HTMLCanvasElement> = async (event) => {
@@ -166,21 +203,65 @@ export default function useMediapipePose(initOptions: PoseLandmarkerOptions) {
 		const x = event.clientX - rect.left;
 		const y = event.clientY - rect.top;
 
-		await updateFocusPoint({ x, y }, false);
+		await updateFocusPoint({ x, y });
+		await redrawResult(false);
+	};
+
+	const updateFocusPointRadius = async (radius: number) => {
+		focusPointRadiusRef.current = radius;
+		setFocusPointRadius(radius);
+		await redrawResult(false);
 	};
 
 	const handleClearFocusPoint = async () => {
-		await updateFocusPoint(null, false);
+		await updateFocusPoint(null);
+		await redrawResult(false);
 	};
 
-	const handleOnImageLoad = async () => {
-		await updateFocusPoint(null, true);
+	const handleOnImageLoad: React.ReactEventHandler<HTMLImageElement> = async (event) => {
+		const maxFocusPointRadius = Math.min(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight) / 2;
+
+		setMaxFocusPointRadius(maxFocusPointRadius);
+		if (maxFocusPointRadius < focusPointRadiusRef.current) {
+			focusPointRadiusRef.current = maxFocusPointRadius;
+		}
+
+		await updateFocusPoint(null);
+		await redrawResult(true);
 	};
 
 	return {
 		refs: { imageRef, canvasRef },
-		states: { focusPoint, modelStatus },
-		actions: { updateOptions },
+		states: { focusPoint, focusPointRadius, maxFocusPointRadius, modelStatus },
+		actions: { updateOptions, updateFocusPointRadius },
 		handlers: { handleCanvasClick, handleClearFocusPoint, handleOnImageLoad },
 	};
 }
+
+type ModelStatusAction =
+	| { state: "inferencing" }
+	| { state: "inference_finished"; inferenceTime: number }
+	| { state: "loading" }
+	| { state: "load_finished"; loadTime: number }
+	| { state: "configuring" }
+	| { state: "configure_finished"; configureTime: number }
+	| { state: "error"; message?: string };
+
+const modelStatusReducer: React.Reducer<ModelStatus, ModelStatusAction> = (state, action) => {
+	switch (action.state) {
+		case "loading":
+			return { state: "load" };
+		case "load_finished":
+			return { ...state, state: "idle", loadTime: action.loadTime };
+		case "configuring":
+			return { ...state, state: "load" };
+		case "configure_finished":
+			return { ...state, state: "idle", loadTime: action.configureTime };
+		case "inferencing":
+			return { ...state, state: "inference" };
+		case "inference_finished":
+			return { ...state, state: "idle", inferenceTime: action.inferenceTime };
+		case "error":
+			return { ...state, state: "error" };
+	}
+};

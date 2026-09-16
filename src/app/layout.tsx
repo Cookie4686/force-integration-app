@@ -44,25 +44,28 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
 				<SidebarProvider>
 					<AppSidebar />
 					<SidebarInset>
-						<header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-							<div className="flex items-center gap-2 px-4">
-								<SidebarTrigger className="-ml-1" />
-								<Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
-								{/* TODO: Autogen breadcrumb or create breadcrumb provider and extract this to a component*/}
-								<Breadcrumb>
-									<BreadcrumbList>
-										<BreadcrumbItem className="hidden md:block">
-											<BreadcrumbLink href="/">Home</BreadcrumbLink>
-										</BreadcrumbItem>
-										<BreadcrumbSeparator className="hidden md:block" />
-										<BreadcrumbItem>
-											<BreadcrumbPage>Breadcrumb WIP</BreadcrumbPage>
-										</BreadcrumbItem>
-									</BreadcrumbList>
-								</Breadcrumb>
-							</div>
-						</header>
-						{children}
+						<div className="h-svh">
+							<header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
+								<div className="flex items-center gap-2 px-4">
+									<SidebarTrigger className="-ml-1" />
+									<Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+									{/* TODO: Autogen breadcrumb or create breadcrumb provider and extract this to a component*/}
+									<Breadcrumb>
+										<BreadcrumbList>
+											<BreadcrumbItem className="hidden md:block">
+												<BreadcrumbLink href="/">Home</BreadcrumbLink>
+											</BreadcrumbItem>
+											<BreadcrumbSeparator className="hidden md:block" />
+											<BreadcrumbItem>
+												<BreadcrumbPage>Breadcrumb WIP</BreadcrumbPage>
+											</BreadcrumbItem>
+										</BreadcrumbList>
+									</Breadcrumb>
+								</div>
+							</header>
+							{/* TODO: any better way to make header sticky? */}
+							<div className="h-[calc(100svh-64px)] overflow-y-scroll">{children}</div>
+						</div>
 					</SidebarInset>
 				</SidebarProvider>
 			</body>
