@@ -30,8 +30,8 @@ export default function PageToolPoseSectionImage({
 				<Image
 					className="block max-h-196 w-auto max-w-full rounded object-contain"
 					loading="eager"
-					width={512}
-					height={512}
+					width={1024}
+					height={1024}
 					src={imageFile ? URL.createObjectURL(imageFile) : PoseModelImage}
 					onLoad={handleOnImageLoad}
 					alt="Pose Model Image"

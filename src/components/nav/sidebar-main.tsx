@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronRight, type LucideIcon } from "lucide-react";
+import Link from "next/link";
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
@@ -54,11 +55,7 @@ export function NavMenuCollapsible({ label, items }: { label: string; items: Nav
 										{item.items?.map((subItem) => (
 											<SidebarMenuSubItem key={subItem.title}>
 												<SidebarMenuSubButton
-													render={
-														<a href={subItem.url}>
-															<span>{subItem.title}</span>
-														</a>
-													}
+													render={<Link href={subItem.url}>{subItem.title}</Link>}
 												></SidebarMenuSubButton>
 											</SidebarMenuSubItem>
 										))}
@@ -76,16 +73,19 @@ export function NavMenuCollapsible({ label, items }: { label: string; items: Nav
 export function NavMenu({ label, items }: { label: string; items: NavItem[] }) {
 	return (
 		<SidebarGroup>
-			<SidebarGroupLabel>{label}</SidebarGroupLabel>
+			<SidebarGroupLabel className="pointer-events-none select-none">{label}</SidebarGroupLabel>
 			<SidebarMenu>
 				{items.map((item) => (
 					<SidebarMenuItem key={item.title}>
 						<SidebarMenuButton
+							size="lg"
 							render={
-								<a className="flex gap-2" href={item.url}>
-									{item.icon && <item.icon size="lg" />}
-									<span>{item.title}</span>
-								</a>
+								<Link className="space-x-2" href={item.url}>
+									<div className="flex aspect-square size-8 items-center justify-center">
+										{item.icon && <item.icon />}
+									</div>
+									<div className="pointer-events-none select-none">{item.title}</div>
+								</Link>
 							}
 						/>
 					</SidebarMenuItem>

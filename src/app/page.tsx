@@ -1,6 +1,6 @@
 "use client";
 
-import { ActivityIcon, ChevronRight, type LucideIcon } from "lucide-react";
+import { ActivityIcon, ChevronRight, type LucideIcon, PersonStandingIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -11,16 +11,20 @@ interface Module {
 	description: string;
 	path: string;
 	icon: LucideIcon;
-	steps: string | null;
 }
 
-const EXERCISE_MODULES: Module[] = [
+const MODULES: Module[] = [
 	{
-		title: "MRCS Exercise",
-		description: "Live joint-angle monitoring for shoulder, elbow, wrist, hip, knee, and ankle rehabilitation.",
+		title: "6 Exercise Test",
+		description: "Test shoulder, elbow, wrist, hip, knee, and ankle.",
 		path: "/mrc",
 		icon: ActivityIcon,
-		steps: "Pre-Session Check → Active Session",
+	},
+	{
+		title: "Pose Detection Tool",
+		description: "Tools for testing pose detection model.",
+		path: "/tool/pose",
+		icon: PersonStandingIcon,
 	},
 ];
 
@@ -37,7 +41,7 @@ export default function HomePage() {
 
 			{/* 3-column card grid */}
 			<div className="grid grid-cols-3 gap-6 max-md:grid-cols-1">
-				{EXERCISE_MODULES.map((mod) => (
+				{MODULES.map((mod) => (
 					<Card className="py-8" key={mod.path}>
 						<CardHeader className="space-y-2">
 							<div className="flex h-14 w-14 items-center justify-center rounded-md border">
@@ -47,7 +51,6 @@ export default function HomePage() {
 						</CardHeader>
 						<CardContent className="h-full space-y-2">
 							<p className="text-muted-foreground flex-1 text-sm">{mod.description}</p>
-							{mod.steps && <span className="text-[0.75rem] font-semibold text-(--clinical-teal)">{mod.steps}</span>}
 						</CardContent>
 						<CardFooter>
 							<Button size="lg" onClick={() => router.push(mod.path)}>
