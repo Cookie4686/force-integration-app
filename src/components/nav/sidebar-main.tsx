@@ -19,14 +19,14 @@ export type NavItemCollapsible = {
 	title: string;
 	url: string;
 	icon?: LucideIcon;
-	isActive?: boolean;
-	items?: NavItem[];
+	items: NavItem[];
 };
 
 export type NavItem = {
 	title: string;
 	url: string;
 	icon: LucideIcon;
+	isActive?: boolean;
 };
 
 export function NavMenuCollapsible({ label, items }: { label: string; items: NavItemCollapsible[] }) {
@@ -37,7 +37,7 @@ export function NavMenuCollapsible({ label, items }: { label: string; items: Nav
 				{items.map((item) => (
 					<Collapsible
 						key={item.title}
-						defaultOpen={item.isActive}
+						defaultOpen={item.items.find((item) => item.isActive) !== undefined}
 						className="group/collapsible"
 						render={
 							<SidebarMenuItem>
@@ -79,6 +79,7 @@ export function NavMenu({ label, items }: { label: string; items: NavItem[] }) {
 					<SidebarMenuItem key={item.title}>
 						<SidebarMenuButton
 							size="lg"
+							variant={item.isActive ? "outline" : "default"}
 							render={
 								<Link className="space-x-2" href={item.url}>
 									<div className="flex aspect-square size-8 items-center justify-center">

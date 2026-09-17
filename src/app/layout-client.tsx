@@ -45,6 +45,7 @@ const navItems: NavItems = [
 export default function RootLayoutClient({ children }: LayoutProps<"/">) {
 	// cookie name is in components/ui/sidebar
 	const [sidebarOpen, setSidebarOpen] = useState<boolean | undefined>(undefined);
+	const pathname = usePathname();
 
 	useEffect(() => {
 		// TODO: I am quite sure that this is safe but maybe there is a better way??
@@ -61,12 +62,18 @@ export default function RootLayoutClient({ children }: LayoutProps<"/">) {
 				setSidebarOpen(value);
 			}}
 		>
-			<AppSidebar navItems={navItems} variant={sidebarVariant} />
+			<AppSidebar
+				navItems={navItems.map(({ groupLabel, items }) => ({
+					groupLabel,
+					items: items.map((item) => ({ ...item, isActive: item.url === pathname })),
+				}))}
+				variant={sidebarVariant}
+			/>
 			<SidebarInset>
 				<div className={sidebarVariant === "inset" ? "h-[calc(100svh-16px)]" : "h-svh"}>
 					<BreadcrumbProvider>
 						{/* TODO: any better way to make header sticky? */}
-						<HeaderBreadcrumb className="h-16" />
+						<HeaderBreadcrumb className="h-16" pathname={pathname} />
 						<div
 							className={cn(
 								"overflow-y-scroll",
@@ -86,9 +93,7 @@ export default function RootLayoutClient({ children }: LayoutProps<"/">) {
 
 const HOME_BREADCRUMB: HeaderBreadcrumbItem = { title: "home", href: "/" };
 
-function HeaderBreadcrumb({ className }: { className?: string }) {
-	const pathname = usePathname();
-
+function HeaderBreadcrumb({ className, pathname }: { className?: string; pathname: string }) {
 	const breadcrumbContextValue = useContext(BreadcrumbContext);
 
 	const breadcrumbItems = useMemo<HeaderBreadcrumbItem[]>(() => {
