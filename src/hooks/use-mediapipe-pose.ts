@@ -11,6 +11,12 @@ import * as Comlink from "comlink";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { PoseLandmarkerWorker } from "@/lib/mediapipe/workers/pose.worker";
+import {
+	DEFAULT_PROCESSING_SETTINGS,
+	PoseProcessingSettings,
+	PoseProcessor,
+	PoseReadout,
+} from "@/lib/pose/processing";
 
 export type FocusPoint = { x: number; y: number };
 
@@ -45,7 +51,10 @@ const parseOptions = ({ type, delegate, ...options }: ModelOption): PoseLandmark
 };
 
 export default function useMediapipePose(initOptions: ModelOption) {
-	const lastResultRef = useRef<PoseLandmarkerResult>(null);
+	// Most recently drawn landmark set (already signal-processed) + the confidence
+	// threshold it was drawn with, so focus-point interactions can redraw it.
+	const lastLandmarksRef = useRef<NormalizedLandmark[][] | null>(null);
+	const lastMinVisibilityRef = useRef<number | undefined>(undefined);
 
 	// IMAGE, VIDEO, CANVAS, SKELETAL DISPLAY RELATED FUNCTION
 	const imageRef = useRef<HTMLImageElement | null>(null);
@@ -53,13 +62,20 @@ export default function useMediapipePose(initOptions: ModelOption) {
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const focusPointRef = useRef<FocusPoint | null>(null);
 	const focusPointRadiusRef = useRef<number>(128);
+	const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null);
 	const [focusPointRadius, setFocusPointRadius] = useState<number>(128);
 	const [maxFocusPointRadius, setMaxFocusPointRadius] = useState<number>(128);
 
-	// Draw a detection result onto the overlay canvas. The canvas backing store is
+	// Draw a set of poses onto the overlay canvas. The canvas backing store is
 	// sized to the intrinsic dimensions of the source (image or video frame); it is
-	// then stretched over the displayed element via CSS.
-	const drawResult = (result: PoseLandmarkerResult, sourceWidth: number, sourceHeight: number): void => {
+	// then stretched over the displayed element via CSS. When minVisibility is set,
+	// landmarks (and any connection touching them) below that visibility are hidden.
+	const drawResult = (
+		landmarksSet: NormalizedLandmark[][],
+		sourceWidth: number,
+		sourceHeight: number,
+		minVisibility?: number
+	): void => {
 		if (canvasRef.current === null || sourceWidth === 0 || sourceHeight === 0) return;
 
 		const ctx = canvasRef.current.getContext("2d");
@@ -73,18 +89,18 @@ export default function useMediapipePose(initOptions: ModelOption) {
 		ctx.rect(0, 0, canvasRef.current.width, canvasRef.current.height);
 		ctx.clip();
 
-		if (result.landmarks) {
+		if (landmarksSet) {
 			const drawingUtils = new DrawingUtils(ctx);
 
 			let targetLandmark: NormalizedLandmark[][] = [];
 
 			if (!focusPointRef.current) {
-				targetLandmark = result.landmarks;
+				targetLandmark = landmarksSet;
 			} else {
 				// Filter According to focus point
 				let minDistance: number | null = null;
 
-				for (const landmark of result.landmarks) {
+				for (const landmark of landmarksSet) {
 					const distance = Math.sqrt(
 						(landmark[0].x * canvasRef.current.clientWidth - focusPointRef.current.x) ** 2
 							+ (landmark[0].y * canvasRef.current.clientHeight - focusPointRef.current.y) ** 2
@@ -97,10 +113,22 @@ export default function useMediapipePose(initOptions: ModelOption) {
 			}
 
 			for (const landmark of targetLandmark) {
+				const connections =
+					minVisibility === undefined ?
+						PoseLandmarker.POSE_CONNECTIONS
+					:	PoseLandmarker.POSE_CONNECTIONS.filter(
+							({ start, end }) =>
+								(landmark[start]?.visibility ?? 1) >= minVisibility
+								&& (landmark[end]?.visibility ?? 1) >= minVisibility
+						);
+
 				drawingUtils.drawLandmarks(landmark, {
-					radius: (data) => DrawingUtils.lerp(data.from!.z, -0.15, 0.1, 5, 1),
+					radius: (data) => {
+						if (minVisibility !== undefined && (data.from?.visibility ?? 1) < minVisibility) return 0;
+						return DrawingUtils.lerp(data.from!.z, -0.15, 0.1, 5, 1);
+					},
 				});
-				drawingUtils.drawConnectors(landmark, PoseLandmarker.POSE_CONNECTIONS);
+				drawingUtils.drawConnectors(landmark, connections);
 			}
 
 			drawingUtils.close();
@@ -109,22 +137,30 @@ export default function useMediapipePose(initOptions: ModelOption) {
 
 	const displayImageResult = (result: PoseLandmarkerResult): void => {
 		if (imageRef.current === null) return;
-		drawResult(result, imageRef.current.naturalWidth, imageRef.current.naturalHeight);
+		lastLandmarksRef.current = result.landmarks;
+		lastMinVisibilityRef.current = undefined;
+		drawResult(result.landmarks, imageRef.current.naturalWidth, imageRef.current.naturalHeight);
 	};
 
-	const displayVideoResult = (result: PoseLandmarkerResult): void => {
-		if (videoRef.current === null) return;
-		drawResult(result, videoRef.current.videoWidth, videoRef.current.videoHeight);
-	};
-
-	// Redraw the most recent result onto whichever source is currently active.
-	// Used by focus-point interactions so the overlay updates even on a paused video.
+	// Redraw the most recent (processed) landmark set onto whichever source is
+	// active. Used by focus-point interactions so the overlay updates even on a
+	// paused video.
 	const redisplayLastResult = (): void => {
-		if (lastResultRef.current === null) return;
+		if (lastLandmarksRef.current === null) return;
 		if (videoRef.current !== null && videoRef.current.videoWidth > 0) {
-			displayVideoResult(lastResultRef.current);
-		} else {
-			displayImageResult(lastResultRef.current);
+			drawResult(
+				lastLandmarksRef.current,
+				videoRef.current.videoWidth,
+				videoRef.current.videoHeight,
+				lastMinVisibilityRef.current
+			);
+		} else if (imageRef.current !== null) {
+			drawResult(
+				lastLandmarksRef.current,
+				imageRef.current.naturalWidth,
+				imageRef.current.naturalHeight,
+				lastMinVisibilityRef.current
+			);
 		}
 	};
 
@@ -134,6 +170,16 @@ export default function useMediapipePose(initOptions: ModelOption) {
 	const poseWorkerRef = useRef<Comlink.Remote<PoseLandmarkerWorker>>(null);
 	const isModelReadyRef = useRef<boolean>(false);
 	const runningModeRef = useRef<ModelOption["runningMode"]>(initOptions.runningMode);
+
+	// --- SIGNAL PROCESSING RELATED FUNCTION ---
+	const processorRef = useRef<PoseProcessor>(new PoseProcessor());
+	const processingSettingsRef = useRef<PoseProcessingSettings>(DEFAULT_PROCESSING_SETTINGS);
+	const [poseReadout, setPoseReadout] = useState<PoseReadout | null>(null);
+	const lastReadoutTimeRef = useRef<number>(0);
+
+	const updateProcessingSettings = useCallback((settings: PoseProcessingSettings) => {
+		processingSettingsRef.current = settings;
+	}, []);
 
 	const detectImageAndDisplayResult = useCallback(async () => {
 		if (
@@ -153,18 +199,9 @@ export default function useMediapipePose(initOptions: ModelOption) {
 			dispatchModelStatus({ state: "error" });
 		} else {
 			dispatchModelStatus({ state: "inference_finished", inferenceTime: response.inferenceTime });
-			lastResultRef.current = response.result;
 			displayImageResult(response.result);
 		}
 	}, []);
-
-	const redrawResult = async (forceRerender: boolean = false) => {
-		if (forceRerender || lastResultRef.current === null) {
-			await detectImageAndDisplayResult();
-		} else {
-			displayImageResult(lastResultRef.current);
-		}
-	};
 
 	// Load Model
 	useEffect(() => {
@@ -199,6 +236,9 @@ export default function useMediapipePose(initOptions: ModelOption) {
 
 			isModelReadyRef.current = false;
 			runningModeRef.current = options.runningMode;
+			// Pose indices may remap after reconfiguring (e.g. numPoses change) — clear
+			// smoothing state so filters don't blend across different tracked bodies.
+			processorRef.current.reset();
 			dispatchModelStatus({ state: "configuring" });
 
 			const response = await poseWorkerRef.current.setOptions(parseOptions(options));
@@ -254,12 +294,72 @@ export default function useMediapipePose(initOptions: ModelOption) {
 				lastVideoTimeRef.current = video.currentTime;
 
 				try {
+					const now = performance.now();
 					const bitmap = await window.createImageBitmap(video);
-					const response = await worker.detectForVideo(bitmap, performance.now());
+					const response = await worker.detectForVideo(bitmap, now);
 					if (response !== null) {
-						lastResultRef.current = response.result;
+						const settings = processingSettingsRef.current;
+						const rawPoses = response.result.landmarks;
+						const minVisibility =
+							settings.confidenceThreshold.enabled ? settings.confidenceThreshold.value : undefined;
+						const canvas = canvasRef.current;
+						const cw = canvas.clientWidth;
+						const ch = canvas.clientHeight;
+						const focus = focusPointRef.current;
+
+						let drawSet: NormalizedLandmark[][];
+						let readout: PoseReadout | null = null;
+
+						if (focus !== null) {
+							// Static reference: the focus point stays exactly where the user
+							// placed it (e.g. on the seated patient). Each frame we pick the
+							// person currently nearest that fixed point, so a doctor moving
+							// through the scene can never drag the tracked position away —
+							// once they step aside, the patient by the reference is selected
+							// again.
+							let target: NormalizedLandmark[] | null = null;
+							let bestDistance: number | null = null;
+							if (cw > 0 && ch > 0) {
+								for (const pose of rawPoses) {
+									const px = pose[0].x * cw;
+									const py = pose[0].y * ch;
+									const distance = Math.hypot(px - focus.x, py - focus.y);
+									if (
+										distance <= focusPointRadiusRef.current
+										&& (bestDistance === null || distance < bestDistance)
+									) {
+										bestDistance = distance;
+										target = pose;
+									}
+								}
+							}
+
+							if (target !== null) {
+								const single = processorRef.current.processSingle(target, settings, now / 1000);
+								drawSet = single.landmarks;
+								readout = single.readout;
+							} else {
+								// Nobody within range of the reference — hide the skeleton until
+								// someone is near it again. The focus point does not move.
+								drawSet = [];
+							}
+						} else {
+							const processed = processorRef.current.process(rawPoses, settings, now / 1000);
+							drawSet = processed.landmarks;
+							readout = processed.readout;
+						}
+
+						lastLandmarksRef.current = drawSet;
+						lastMinVisibilityRef.current = minVisibility;
+
 						dispatchModelStatus({ state: "inference_finished", inferenceTime: response.inferenceTime });
-						displayVideoResult(response.result);
+						drawResult(drawSet, video.videoWidth, video.videoHeight, minVisibility);
+
+						// Throttle readout state updates so we don't re-render every frame.
+						if (now - lastReadoutTimeRef.current > 100) {
+							lastReadoutTimeRef.current = now;
+							setPoseReadout(readout);
+						}
 					}
 				} catch {
 					// transient decode/detect failures — keep the loop alive
@@ -271,7 +371,6 @@ export default function useMediapipePose(initOptions: ModelOption) {
 
 		rafIdRef.current = requestAnimationFrame(loop);
 		// loop only reads refs, so a stable identity is safe
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	const startCamera = useCallback(async () => {
@@ -281,6 +380,8 @@ export default function useMediapipePose(initOptions: ModelOption) {
 		streamRef.current = stream;
 		videoRef.current.srcObject = stream;
 		await videoRef.current.play();
+		processorRef.current.reset();
+		lastVideoTimeRef.current = -1;
 		setIsWebcamActive(true);
 	}, []);
 
@@ -294,7 +395,6 @@ export default function useMediapipePose(initOptions: ModelOption) {
 	}, []);
 
 	// --- FOCUS POINT RELATED FUNCTION ---
-	const [focusPoint, setFocusPoint] = useState<FocusPoint | null>(null);
 
 	const updateFocusPoint = async (focusPoint: typeof focusPointRef.current) => {
 		focusPointRef.current = focusPoint;
@@ -302,7 +402,7 @@ export default function useMediapipePose(initOptions: ModelOption) {
 	};
 
 	const handleCanvasClick: React.MouseEventHandler<HTMLCanvasElement> = async (event) => {
-		if (canvasRef.current === null || imageRef.current === null) return;
+		if (canvasRef.current === null) return;
 
 		const canvas = canvasRef.current;
 
@@ -310,6 +410,8 @@ export default function useMediapipePose(initOptions: ModelOption) {
 		const x = event.clientX - rect.left;
 		const y = event.clientY - rect.top;
 
+		// New selection — start the locked-on smoothing track fresh for this person.
+		processorRef.current.resetFocused();
 		await updateFocusPoint({ x, y });
 		redisplayLastResult();
 	};
@@ -321,6 +423,7 @@ export default function useMediapipePose(initOptions: ModelOption) {
 	};
 
 	const handleClearFocusPoint = async () => {
+		processorRef.current.resetFocused();
 		await updateFocusPoint(null);
 		redisplayLastResult();
 	};
@@ -338,7 +441,7 @@ export default function useMediapipePose(initOptions: ModelOption) {
 		applyMaxFocusPointRadius(event.currentTarget.naturalWidth, event.currentTarget.naturalHeight);
 
 		await updateFocusPoint(null);
-		await redrawResult(true);
+		await detectImageAndDisplayResult();
 	};
 
 	const handleVideoLoadedMetadata: React.ReactEventHandler<HTMLVideoElement> = async (event) => {
@@ -346,12 +449,22 @@ export default function useMediapipePose(initOptions: ModelOption) {
 
 		await updateFocusPoint(null);
 		lastVideoTimeRef.current = -1;
+		// New clip / dimensions — drop any smoothing state carried from the previous source.
+		processorRef.current.reset();
 	};
 
 	return {
 		refs: { imageRef, videoRef, canvasRef },
-		states: { focusPoint, focusPointRadius, maxFocusPointRadius, modelStatus, isWebcamActive },
-		actions: { updateOptions, updateFocusPointRadius, startVideoDetection, stopVideoDetection, startCamera, stopCamera },
+		states: { focusPoint, focusPointRadius, maxFocusPointRadius, modelStatus, isWebcamActive, poseReadout },
+		actions: {
+			updateOptions,
+			updateFocusPointRadius,
+			startVideoDetection,
+			stopVideoDetection,
+			startCamera,
+			stopCamera,
+			updateProcessingSettings,
+		},
 		handlers: { handleCanvasClick, handleClearFocusPoint, handleOnImageLoad, handleVideoLoadedMetadata },
 	};
 }

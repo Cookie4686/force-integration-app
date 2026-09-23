@@ -20,6 +20,8 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import useMediapipePose, { ModelOption } from "@/hooks/use-mediapipe-pose";
 
+import PageToolPoseSectionProcessing from "./processing-section";
+
 const MODEL_TYPE_ITEMS: { value: ModelOption["type"]; label: string }[] = [
 	{ value: "lite", label: "Pose Landmarker Lite" },
 	{ value: "full", label: "Pose Landmarker Full" },
@@ -146,6 +148,7 @@ export default function PageToolPoseSectionConfig({
 							</div>
 							<FieldDescription>Stream your camera for live pose detection.</FieldDescription>
 						</Field>
+						<PageToolPoseSectionProcessing mediapipePose={mediapipePose} />
 					</div>
 				</TabsContent>
 			</Tabs>

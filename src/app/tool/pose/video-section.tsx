@@ -76,6 +76,12 @@ export default function PageToolPoseSectionVideo({
 					ref={canvasRef}
 					onClick={handleCanvasClick}
 				/>
+				{isFocusMode && (
+					<div className="pointer-events-none absolute top-4 left-1/2 -translate-x-1/2 rounded bg-black/70 px-3 py-1.5 text-center text-sm text-white">
+						Click a fixed reference point (e.g. on the seated patient). The person nearest it is tracked;
+						the point stays put so passers-by can&apos;t steal it.
+					</div>
+				)}
 				{focusPoint && isShowFocusPoint && (
 					<div
 						className="pointer-events-none absolute flex -translate-1/2 items-center justify-center rounded-full border border-white"
