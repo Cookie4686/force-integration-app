@@ -95,11 +95,7 @@ const oneEuro = (
 
 type KalmanState = { x: number; p: number; init: boolean };
 
-const kalman = (
-	state: KalmanState,
-	z: number,
-	params: { processNoise: number; measurementNoise: number }
-): number => {
+const kalman = (state: KalmanState, z: number, params: { processNoise: number; measurementNoise: number }): number => {
 	if (!state.init) {
 		state.init = true;
 		state.x = z;
@@ -133,69 +129,6 @@ const createLandmarkFilterState = (): LandmarkFilterState => ({
 	kalman: [createKalmanState(), createKalmanState(), createKalmanState()],
 	lastOut: null,
 });
-
-const midpoint = (a: NormalizedLandmark, b: NormalizedLandmark): Vec3 => ({
-	x: (a.x + b.x) / 2,
-	y: (a.y + b.y) / 2,
-	z: (a.z + b.z) / 2,
-});
-
-// --- small vector helpers (Vec3) -------------------------------------------
-const vSub = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
-const vAdd = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
-const vScale = (a: Vec3, s: number): Vec3 => ({ x: a.x * s, y: a.y * s, z: a.z * s });
-const vDot = (a: Vec3, b: Vec3): number => a.x * b.x + a.y * b.y + a.z * b.z;
-const vCross = (a: Vec3, b: Vec3): Vec3 => ({
-	x: a.y * b.z - a.z * b.y,
-	y: a.z * b.x - a.x * b.z,
-	z: a.x * b.y - a.y * b.x,
-});
-const vNorm = (a: Vec3): Vec3 => {
-	const m = Math.hypot(a.x, a.y, a.z) || 1e-6;
-	return { x: a.x / m, y: a.y / m, z: a.z / m };
-};
-
-// Rotate a pose into a canonical, camera-facing orientation using its own body
-// frame (built from shoulders and hips). The result is hip-centered with:
-//   x = viewer's right, y = down (screen convention), z = depth (front nearest)
-// so the patient always faces the camera regardless of the real camera angle —
-// giving a consistent frame for downstream role/posture checks.
-export const canonicalizePose = (pose: NormalizedLandmark[]): Vec3[] | null => {
-	const ls = pose[LM.leftShoulder];
-	const rs = pose[LM.rightShoulder];
-	const lh = pose[LM.leftHip];
-	const rh = pose[LM.rightHip];
-	if (!ls || !rs || !lh || !rh) return null;
-
-	const hip = midpoint(lh, rh);
-	const shoulder = midpoint(ls, rs);
-
-	// Body-up: hips → shoulders (world y is down, so this points up the torso).
-	const up = vNorm(vSub(shoulder, hip));
-	// Body-lateral: left → right side, averaged over shoulders and hips.
-	let lateral = vAdd(vSub(rs, ls), vSub(rh, lh));
-	// Make lateral orthogonal to up, then complete a right-handed frame.
-	lateral = vNorm(vSub(lateral, vScale(up, vDot(lateral, up))));
-	let forward = vNorm(vCross(lateral, up));
-
-	// Orient "forward" toward the front of the body (where the face is).
-	const nose = pose[LM.nose];
-	if (nose && vDot(forward, vSub(nose, hip)) < 0) {
-		forward = vScale(forward, -1);
-	}
-
-	// Project each landmark onto the body frame. Mirror x (a person facing you
-	// shows their right on your left) and flip y so up appears up on screen;
-	// negate depth so the front of the body is nearest the viewer.
-	return pose.map((p) => {
-		const rel = vSub(p, hip);
-		return {
-			x: -vDot(rel, lateral),
-			y: -vDot(rel, up),
-			z: -vDot(rel, forward),
-		};
-	});
-};
 
 export class PoseProcessor {
 	// [poseIndex][landmarkIndex]
@@ -283,7 +216,11 @@ export class PoseProcessor {
 
 	// Smooth a single locked-on pose against the dedicated track, so its data stays
 	// consistent for that one individual regardless of detector pose ordering.
-	processSingle(pose: NormalizedLandmark[], settings: PoseProcessingSettings, timeSeconds: number): NormalizedLandmark[] {
+	processSingle(
+		pose: NormalizedLandmark[],
+		settings: PoseProcessingSettings,
+		timeSeconds: number
+	): NormalizedLandmark[] {
 		return pose.map((lm, landmarkIndex) =>
 			this.applyFilters((this.focusedStates[landmarkIndex] ??= createLandmarkFilterState()), lm, settings, timeSeconds)
 		);
