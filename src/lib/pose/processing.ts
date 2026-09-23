@@ -1,55 +1,57 @@
 // Signal-processing pipeline for a stream of MediaPipe pose landmarks.
 //
-// Applied per frame, in the main thread, between detection and drawing:
-//   1. One Euro filter (jitter/lag-adaptive smoothing) — optional
-//   2. Kalman filter   (random-walk smoothing)          — optional
-//   3. Confidence threshold — applied at draw time (see minVisibility)
-//   4. Pose-relative normalization — hip-centered, torso-scaled readout
+// Per-landmark preprocessing order (see PoseProcessor.applyFilters):
+//   1. Confidence gate — reject below-threshold measurements BEFORE smoothing so
+//      unreliable points never corrupt the filters; the filter coasts on its last
+//      accepted estimate during the dropout.
+//   2. One Euro filter (jitter/lag-adaptive smoothing) — optional.
+//   3. Kalman filter   (random-walk smoothing)         — optional, stacked after.
+// Normalization (0..1 vs raw pixels) and canonicalization are OUTPUT
+// representations applied after smoothing, so filtering always runs in
+// MediaPipe's native 0..1 space. The confidence threshold is additionally used
+// at draw time to hide the rejected (coasted) landmarks from the overlay.
 //
 // One Euro and Kalman are independent switches and stack in that order when
 // both are enabled. Filter state is keyed by (pose index, landmark index,
 // coordinate); it is reset via reset() whenever the source or pose count
 // changes so state from one clip/person does not leak into another.
+//
+// Coordinate labels (X/Y/Z overlay) are drawn by the drawing layer; the
+// `labels` + `normalized` settings only carry the user's choices:
+//   - MediaPipe landmarks are already normalized to 0..1 of the frame size.
+//   - `normalized: true`  → show those 0..1 values.
+//   - `normalized: false` → show raw pixel positions (value × frame width/height).
 
 import { NormalizedLandmark } from "@mediapipe/tasks-vision";
-
-export type ToggleWithValue = { enabled: boolean; value: number };
 
 export type PoseProcessingSettings = {
 	confidenceThreshold: { enabled: boolean; value: number };
 	oneEuro: { enabled: boolean; minCutoff: number; beta: number; dCutoff: number };
 	kalman: { enabled: boolean; processNoise: number; measurementNoise: number };
-	normalization: { enabled: boolean };
+	// Which per-landmark coordinate axes to overlay as text on the video/image.
+	labels: { showX: boolean; showY: boolean; showZ: boolean };
+	// true → coordinates shown as MediaPipe's normalized 0..1; false → raw pixels.
+	normalized: boolean;
 };
 
 export const DEFAULT_PROCESSING_SETTINGS: PoseProcessingSettings = {
 	confidenceThreshold: { enabled: false, value: 0.5 },
 	oneEuro: { enabled: false, minCutoff: 1.0, beta: 0.02, dCutoff: 1.0 },
 	kalman: { enabled: false, processNoise: 0.01, measurementNoise: 0.1 },
-	normalization: { enabled: false },
+	labels: { showX: false, showY: false, showZ: false },
+	normalized: true,
 };
 
-// MediaPipe Pose landmark indices used for normalization / readout.
+// MediaPipe Pose landmark indices used to build the canonical body frame.
 const LM = {
 	nose: 0,
 	leftShoulder: 11,
 	rightShoulder: 12,
-	leftWrist: 15,
-	rightWrist: 16,
 	leftHip: 23,
 	rightHip: 24,
-	leftAnkle: 27,
-	rightAnkle: 28,
 } as const;
 
 export type Vec3 = { x: number; y: number; z: number };
-
-export type PoseReadout = {
-	hipCenter: Vec3;
-	torsoScale: number;
-	// A few key landmarks in normalized (hip-centered, torso-scaled) space.
-	keyPoints: { label: string; x: number; y: number; z: number; visibility: number }[];
-};
 
 // --- One Euro filter (per scalar) ------------------------------------------
 
@@ -119,6 +121,8 @@ const kalman = (
 type LandmarkFilterState = {
 	oneEuro: [OneEuroState, OneEuroState, OneEuroState];
 	kalman: [KalmanState, KalmanState, KalmanState];
+	// Last accepted (filtered) output, used to "coast" through rejected low-confidence frames.
+	lastOut: Vec3 | null;
 };
 
 const createOneEuroState = (): OneEuroState => ({ xPrev: 0, dxPrev: 0, tPrev: 0, init: false });
@@ -127,10 +131,8 @@ const createKalmanState = (): KalmanState => ({ x: 0, p: 1, init: false });
 const createLandmarkFilterState = (): LandmarkFilterState => ({
 	oneEuro: [createOneEuroState(), createOneEuroState(), createOneEuroState()],
 	kalman: [createKalmanState(), createKalmanState(), createKalmanState()],
+	lastOut: null,
 });
-
-const dist3 = (a: Vec3, b: Vec3): number =>
-	Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2 + (a.z - b.z) ** 2);
 
 const midpoint = (a: NormalizedLandmark, b: NormalizedLandmark): Vec3 => ({
 	x: (a.x + b.x) / 2,
@@ -138,41 +140,61 @@ const midpoint = (a: NormalizedLandmark, b: NormalizedLandmark): Vec3 => ({
 	z: (a.z + b.z) / 2,
 });
 
-export const normalizePose = (pose: NormalizedLandmark[]): PoseReadout | null => {
-	const lh = pose[LM.leftHip];
-	const rh = pose[LM.rightHip];
-	const ls = pose[LM.leftShoulder];
-	const rs = pose[LM.rightShoulder];
-	if (!lh || !rh || !ls || !rs) return null;
-
-	const hipCenter = midpoint(lh, rh);
-	const shoulderCenter = midpoint(ls, rs);
-	const torsoScale = dist3(hipCenter, shoulderCenter) || 1e-6;
-
-	const norm = (lm: NormalizedLandmark, label: string) => ({
-		label,
-		x: (lm.x - hipCenter.x) / torsoScale,
-		y: (lm.y - hipCenter.y) / torsoScale,
-		z: (lm.z - hipCenter.z) / torsoScale,
-		visibility: lm.visibility,
-	});
-
-	return {
-		hipCenter,
-		torsoScale,
-		keyPoints: [
-			norm(pose[LM.nose], "Nose"),
-			norm(pose[LM.leftWrist], "L Wrist"),
-			norm(pose[LM.rightWrist], "R Wrist"),
-			norm(pose[LM.leftAnkle], "L Ankle"),
-			norm(pose[LM.rightAnkle], "R Ankle"),
-		],
-	};
+// --- small vector helpers (Vec3) -------------------------------------------
+const vSub = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x - b.x, y: a.y - b.y, z: a.z - b.z });
+const vAdd = (a: Vec3, b: Vec3): Vec3 => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
+const vScale = (a: Vec3, s: number): Vec3 => ({ x: a.x * s, y: a.y * s, z: a.z * s });
+const vDot = (a: Vec3, b: Vec3): number => a.x * b.x + a.y * b.y + a.z * b.z;
+const vCross = (a: Vec3, b: Vec3): Vec3 => ({
+	x: a.y * b.z - a.z * b.y,
+	y: a.z * b.x - a.x * b.z,
+	z: a.x * b.y - a.y * b.x,
+});
+const vNorm = (a: Vec3): Vec3 => {
+	const m = Math.hypot(a.x, a.y, a.z) || 1e-6;
+	return { x: a.x / m, y: a.y / m, z: a.z / m };
 };
 
-export type ProcessedFrame = {
-	landmarks: NormalizedLandmark[][];
-	readout: PoseReadout | null;
+// Rotate a pose into a canonical, camera-facing orientation using its own body
+// frame (built from shoulders and hips). The result is hip-centered with:
+//   x = viewer's right, y = down (screen convention), z = depth (front nearest)
+// so the patient always faces the camera regardless of the real camera angle —
+// giving a consistent frame for downstream role/posture checks.
+export const canonicalizePose = (pose: NormalizedLandmark[]): Vec3[] | null => {
+	const ls = pose[LM.leftShoulder];
+	const rs = pose[LM.rightShoulder];
+	const lh = pose[LM.leftHip];
+	const rh = pose[LM.rightHip];
+	if (!ls || !rs || !lh || !rh) return null;
+
+	const hip = midpoint(lh, rh);
+	const shoulder = midpoint(ls, rs);
+
+	// Body-up: hips → shoulders (world y is down, so this points up the torso).
+	const up = vNorm(vSub(shoulder, hip));
+	// Body-lateral: left → right side, averaged over shoulders and hips.
+	let lateral = vAdd(vSub(rs, ls), vSub(rh, lh));
+	// Make lateral orthogonal to up, then complete a right-handed frame.
+	lateral = vNorm(vSub(lateral, vScale(up, vDot(lateral, up))));
+	let forward = vNorm(vCross(lateral, up));
+
+	// Orient "forward" toward the front of the body (where the face is).
+	const nose = pose[LM.nose];
+	if (nose && vDot(forward, vSub(nose, hip)) < 0) {
+		forward = vScale(forward, -1);
+	}
+
+	// Project each landmark onto the body frame. Mirror x (a person facing you
+	// shows their right on your left) and flip y so up appears up on screen;
+	// negate depth so the front of the body is nearest the viewer.
+	return pose.map((p) => {
+		const rel = vSub(p, hip);
+		return {
+			x: -vDot(rel, lateral),
+			y: -vDot(rel, up),
+			z: -vDot(rel, forward),
+		};
+	});
 };
 
 export class PoseProcessor {
@@ -199,14 +221,32 @@ export class PoseProcessor {
 		return (poseStates[landmarkIndex] ??= createLandmarkFilterState());
 	}
 
+	// Preprocess one landmark in the recommended order:
+	//   1. Confidence gate — reject a below-threshold (unreliable) measurement so it
+	//      never corrupts the smoothers; coast on the last accepted estimate instead.
+	//   2. One Euro filter — adaptive de-jitter on the accepted measurement.
+	//   3. Kalman filter   — model-based smoothing, stacked after One Euro.
+	// Normalization / canonicalization happen later (they are output representations),
+	// so smoothing always runs in MediaPipe's native 0..1 space.
 	private applyFilters(
 		state: LandmarkFilterState,
 		lm: NormalizedLandmark,
 		settings: PoseProcessingSettings,
 		timeSeconds: number
 	): NormalizedLandmark {
+		// 1. Confidence gate (measurement rejection).
+		if (settings.confidenceThreshold.enabled && lm.visibility < settings.confidenceThreshold.value) {
+			// Don't advance the filters on a bad measurement. Hold the last good
+			// estimate if we have one; otherwise pass the raw point through unchanged.
+			if (state.lastOut !== null) {
+				return { ...lm, x: state.lastOut.x, y: state.lastOut.y, z: state.lastOut.z };
+			}
+			return { ...lm };
+		}
+
 		let { x, y, z } = lm;
 
+		// 2. One Euro filter.
 		if (settings.oneEuro.enabled) {
 			x = oneEuro(state.oneEuro[0], x, timeSeconds, settings.oneEuro);
 			y = oneEuro(state.oneEuro[1], y, timeSeconds, settings.oneEuro);
@@ -215,6 +255,7 @@ export class PoseProcessor {
 			state.oneEuro[0].init = state.oneEuro[1].init = state.oneEuro[2].init = false;
 		}
 
+		// 3. Kalman filter.
 		if (settings.kalman.enabled) {
 			x = kalman(state.kalman[0], x, settings.kalman);
 			y = kalman(state.kalman[1], y, settings.kalman);
@@ -223,6 +264,7 @@ export class PoseProcessor {
 			state.kalman[0].init = state.kalman[1].init = state.kalman[2].init = false;
 		}
 
+		state.lastOut = { x, y, z };
 		return { ...lm, x, y, z };
 	}
 
@@ -231,32 +273,19 @@ export class PoseProcessor {
 		landmarks: NormalizedLandmark[][],
 		settings: PoseProcessingSettings,
 		timeSeconds: number
-	): ProcessedFrame {
-		const outLandmarks = landmarks.map((pose, poseIndex) =>
+	): NormalizedLandmark[][] {
+		return landmarks.map((pose, poseIndex) =>
 			pose.map((lm, landmarkIndex) =>
 				this.applyFilters(this.ensureState(poseIndex, landmarkIndex), lm, settings, timeSeconds)
 			)
 		);
-
-		const readout =
-			settings.normalization.enabled && outLandmarks.length > 0 ? normalizePose(outLandmarks[0]) : null;
-
-		return { landmarks: outLandmarks, readout };
 	}
 
 	// Smooth a single locked-on pose against the dedicated track, so its data stays
 	// consistent for that one individual regardless of detector pose ordering.
-	processSingle(
-		pose: NormalizedLandmark[],
-		settings: PoseProcessingSettings,
-		timeSeconds: number
-	): ProcessedFrame {
-		const smoothed = pose.map((lm, landmarkIndex) =>
+	processSingle(pose: NormalizedLandmark[], settings: PoseProcessingSettings, timeSeconds: number): NormalizedLandmark[] {
+		return pose.map((lm, landmarkIndex) =>
 			this.applyFilters((this.focusedStates[landmarkIndex] ??= createLandmarkFilterState()), lm, settings, timeSeconds)
 		);
-
-		const readout = settings.normalization.enabled ? normalizePose(smoothed) : null;
-
-		return { landmarks: [smoothed], readout };
 	}
 }

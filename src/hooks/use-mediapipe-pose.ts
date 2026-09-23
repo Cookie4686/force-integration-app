@@ -11,14 +11,17 @@ import * as Comlink from "comlink";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 
 import { PoseLandmarkerWorker } from "@/lib/mediapipe/workers/pose.worker";
-import {
-	DEFAULT_PROCESSING_SETTINGS,
-	PoseProcessingSettings,
-	PoseProcessor,
-	PoseReadout,
-} from "@/lib/pose/processing";
+import { DEFAULT_PROCESSING_SETTINGS, PoseProcessingSettings, PoseProcessor } from "@/lib/pose/processing";
 
 export type FocusPoint = { x: number; y: number };
+
+type DrawOptions = {
+	minVisibility?: number;
+	showX: boolean;
+	showY: boolean;
+	showZ: boolean;
+	normalized: boolean;
+};
 
 export type ModelStatus = {
 	state: "idle" | "load" | "inference" | "error";
@@ -51,10 +54,11 @@ const parseOptions = ({ type, delegate, ...options }: ModelOption): PoseLandmark
 };
 
 export default function useMediapipePose(initOptions: ModelOption) {
-	// Most recently drawn landmark set (already signal-processed) + the confidence
-	// threshold it was drawn with, so focus-point interactions can redraw it.
+	// Most recently drawn landmark set (already signal-processed), so focus-point
+	// and settings changes can redraw without re-running detection.
 	const lastLandmarksRef = useRef<NormalizedLandmark[][] | null>(null);
-	const lastMinVisibilityRef = useRef<number | undefined>(undefined);
+	// Current processing/display settings, read live by the draw + detection paths.
+	const processingSettingsRef = useRef<PoseProcessingSettings>(DEFAULT_PROCESSING_SETTINGS);
 
 	// IMAGE, VIDEO, CANVAS, SKELETAL DISPLAY RELATED FUNCTION
 	const imageRef = useRef<HTMLImageElement | null>(null);
@@ -66,6 +70,19 @@ export default function useMediapipePose(initOptions: ModelOption) {
 	const [focusPointRadius, setFocusPointRadius] = useState<number>(128);
 	const [maxFocusPointRadius, setMaxFocusPointRadius] = useState<number>(128);
 
+	// Derive the current draw options (confidence gate + coordinate-label choices)
+	// from the live settings, so both the image and video paths stay in sync.
+	const currentDrawOptions = (): DrawOptions => {
+		const s = processingSettingsRef.current;
+		return {
+			minVisibility: s.confidenceThreshold.enabled ? s.confidenceThreshold.value : undefined,
+			showX: s.labels.showX,
+			showY: s.labels.showY,
+			showZ: s.labels.showZ,
+			normalized: s.normalized,
+		};
+	};
+
 	// Draw a set of poses onto the overlay canvas. The canvas backing store is
 	// sized to the intrinsic dimensions of the source (image or video frame); it is
 	// then stretched over the displayed element via CSS. When minVisibility is set,
@@ -74,12 +91,14 @@ export default function useMediapipePose(initOptions: ModelOption) {
 		landmarksSet: NormalizedLandmark[][],
 		sourceWidth: number,
 		sourceHeight: number,
-		minVisibility?: number
+		options: DrawOptions
 	): void => {
 		if (canvasRef.current === null || sourceWidth === 0 || sourceHeight === 0) return;
 
 		const ctx = canvasRef.current.getContext("2d");
 		if (!ctx) return;
+
+		const { minVisibility, showX, showY, showZ, normalized } = options;
 
 		canvasRef.current.width = sourceWidth;
 		canvasRef.current.height = sourceHeight;
@@ -132,35 +151,58 @@ export default function useMediapipePose(initOptions: ModelOption) {
 			}
 
 			drawingUtils.close();
+
+			// Coordinate labels: X/Y/Z text per landmark, either normalized (0..1)
+			// or raw pixels (value × frame width/height). z has no true pixel unit,
+			// so in raw mode it uses the width scale (MediaPipe's z convention).
+			if (showX || showY || showZ) {
+				// Keep on-screen text size roughly constant regardless of source resolution.
+				const displayScale = sourceWidth / (canvasRef.current.clientWidth || sourceWidth);
+				const fontPx = 11 * displayScale;
+				ctx.font = `${fontPx}px sans-serif`;
+				ctx.textBaseline = "bottom";
+				ctx.lineWidth = Math.max(1, fontPx / 4);
+				ctx.strokeStyle = "rgba(0,0,0,0.85)";
+				ctx.fillStyle = "#ffffff";
+
+				const fmt = (value: number) => (normalized ? value.toFixed(2) : String(Math.round(value)));
+
+				for (const landmark of targetLandmark) {
+					for (const lm of landmark) {
+						if (minVisibility !== undefined && (lm.visibility ?? 1) < minVisibility) continue;
+
+						const parts: string[] = [];
+						if (showX) parts.push(`x${fmt(normalized ? lm.x : lm.x * sourceWidth)}`);
+						if (showY) parts.push(`y${fmt(normalized ? lm.y : lm.y * sourceHeight)}`);
+						if (showZ) parts.push(`z${fmt(normalized ? lm.z : lm.z * sourceWidth)}`);
+						const text = parts.join(" ");
+
+						const px = lm.x * sourceWidth + 4 * displayScale;
+						const py = lm.y * sourceHeight - 2 * displayScale;
+						ctx.strokeText(text, px, py);
+						ctx.fillText(text, px, py);
+					}
+				}
+			}
 		}
 	};
 
 	const displayImageResult = (result: PoseLandmarkerResult): void => {
 		if (imageRef.current === null) return;
 		lastLandmarksRef.current = result.landmarks;
-		lastMinVisibilityRef.current = undefined;
-		drawResult(result.landmarks, imageRef.current.naturalWidth, imageRef.current.naturalHeight);
+		drawResult(result.landmarks, imageRef.current.naturalWidth, imageRef.current.naturalHeight, currentDrawOptions());
 	};
 
 	// Redraw the most recent (processed) landmark set onto whichever source is
-	// active. Used by focus-point interactions so the overlay updates even on a
-	// paused video.
+	// active. Used by focus-point interactions and live settings changes so the
+	// overlay updates even on a paused video / still image.
 	const redisplayLastResult = (): void => {
 		if (lastLandmarksRef.current === null) return;
+		const options = currentDrawOptions();
 		if (videoRef.current !== null && videoRef.current.videoWidth > 0) {
-			drawResult(
-				lastLandmarksRef.current,
-				videoRef.current.videoWidth,
-				videoRef.current.videoHeight,
-				lastMinVisibilityRef.current
-			);
+			drawResult(lastLandmarksRef.current, videoRef.current.videoWidth, videoRef.current.videoHeight, options);
 		} else if (imageRef.current !== null) {
-			drawResult(
-				lastLandmarksRef.current,
-				imageRef.current.naturalWidth,
-				imageRef.current.naturalHeight,
-				lastMinVisibilityRef.current
-			);
+			drawResult(lastLandmarksRef.current, imageRef.current.naturalWidth, imageRef.current.naturalHeight, options);
 		}
 	};
 
@@ -172,13 +214,19 @@ export default function useMediapipePose(initOptions: ModelOption) {
 	const runningModeRef = useRef<ModelOption["runningMode"]>(initOptions.runningMode);
 
 	// --- SIGNAL PROCESSING RELATED FUNCTION ---
+	// (processingSettingsRef is declared near the top so the draw path can read it.)
 	const processorRef = useRef<PoseProcessor>(new PoseProcessor());
-	const processingSettingsRef = useRef<PoseProcessingSettings>(DEFAULT_PROCESSING_SETTINGS);
-	const [poseReadout, setPoseReadout] = useState<PoseReadout | null>(null);
-	const lastReadoutTimeRef = useRef<number>(0);
+	// Separate smoothing track + latest value for the tracked person's 3D world
+	// landmarks (read by the 3D viewer's own render loop).
+	const worldProcessorRef = useRef<PoseProcessor>(new PoseProcessor());
+	const worldLandmarksRef = useRef<NormalizedLandmark[] | null>(null);
 
 	const updateProcessingSettings = useCallback((settings: PoseProcessingSettings) => {
 		processingSettingsRef.current = settings;
+		// Redraw immediately so label/normalization/threshold changes show up even on
+		// a still image or a paused video (the video loop already redraws each frame).
+		redisplayLastResult();
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	const detectImageAndDisplayResult = useCallback(async () => {
@@ -239,6 +287,7 @@ export default function useMediapipePose(initOptions: ModelOption) {
 			// Pose indices may remap after reconfiguring (e.g. numPoses change) — clear
 			// smoothing state so filters don't blend across different tracked bodies.
 			processorRef.current.reset();
+			worldProcessorRef.current.reset();
 			dispatchModelStatus({ state: "configuring" });
 
 			const response = await poseWorkerRef.current.setOptions(parseOptions(options));
@@ -300,15 +349,14 @@ export default function useMediapipePose(initOptions: ModelOption) {
 					if (response !== null) {
 						const settings = processingSettingsRef.current;
 						const rawPoses = response.result.landmarks;
-						const minVisibility =
-							settings.confidenceThreshold.enabled ? settings.confidenceThreshold.value : undefined;
+						const worldPoses = response.result.worldLandmarks;
 						const canvas = canvasRef.current;
 						const cw = canvas.clientWidth;
 						const ch = canvas.clientHeight;
 						const focus = focusPointRef.current;
 
 						let drawSet: NormalizedLandmark[][];
-						let readout: PoseReadout | null = null;
+						let targetIndex = -1;
 
 						if (focus !== null) {
 							// Static reference: the focus point stays exactly where the user
@@ -317,49 +365,49 @@ export default function useMediapipePose(initOptions: ModelOption) {
 							// through the scene can never drag the tracked position away —
 							// once they step aside, the patient by the reference is selected
 							// again.
-							let target: NormalizedLandmark[] | null = null;
 							let bestDistance: number | null = null;
 							if (cw > 0 && ch > 0) {
-								for (const pose of rawPoses) {
-									const px = pose[0].x * cw;
-									const py = pose[0].y * ch;
+								for (let i = 0; i < rawPoses.length; i++) {
+									const px = rawPoses[i][0].x * cw;
+									const py = rawPoses[i][0].y * ch;
 									const distance = Math.hypot(px - focus.x, py - focus.y);
 									if (
 										distance <= focusPointRadiusRef.current
 										&& (bestDistance === null || distance < bestDistance)
 									) {
 										bestDistance = distance;
-										target = pose;
+										targetIndex = i;
 									}
 								}
 							}
 
-							if (target !== null) {
-								const single = processorRef.current.processSingle(target, settings, now / 1000);
-								drawSet = single.landmarks;
-								readout = single.readout;
+							if (targetIndex >= 0) {
+								drawSet = [processorRef.current.processSingle(rawPoses[targetIndex], settings, now / 1000)];
 							} else {
 								// Nobody within range of the reference — hide the skeleton until
 								// someone is near it again. The focus point does not move.
 								drawSet = [];
 							}
 						} else {
-							const processed = processorRef.current.process(rawPoses, settings, now / 1000);
-							drawSet = processed.landmarks;
-							readout = processed.readout;
+							drawSet = processorRef.current.process(rawPoses, settings, now / 1000);
+							targetIndex = rawPoses.length > 0 ? 0 : -1;
+						}
+
+						// Feed the 3D viewer the tracked person's smoothed world landmarks.
+						if (targetIndex >= 0 && worldPoses[targetIndex]) {
+							worldLandmarksRef.current = worldProcessorRef.current.processSingle(
+								worldPoses[targetIndex],
+								settings,
+								now / 1000
+							);
+						} else {
+							worldLandmarksRef.current = null;
 						}
 
 						lastLandmarksRef.current = drawSet;
-						lastMinVisibilityRef.current = minVisibility;
 
 						dispatchModelStatus({ state: "inference_finished", inferenceTime: response.inferenceTime });
-						drawResult(drawSet, video.videoWidth, video.videoHeight, minVisibility);
-
-						// Throttle readout state updates so we don't re-render every frame.
-						if (now - lastReadoutTimeRef.current > 100) {
-							lastReadoutTimeRef.current = now;
-							setPoseReadout(readout);
-						}
+						drawResult(drawSet, video.videoWidth, video.videoHeight, currentDrawOptions());
 					}
 				} catch {
 					// transient decode/detect failures — keep the loop alive
@@ -381,6 +429,7 @@ export default function useMediapipePose(initOptions: ModelOption) {
 		videoRef.current.srcObject = stream;
 		await videoRef.current.play();
 		processorRef.current.reset();
+		worldProcessorRef.current.reset();
 		lastVideoTimeRef.current = -1;
 		setIsWebcamActive(true);
 	}, []);
@@ -412,6 +461,7 @@ export default function useMediapipePose(initOptions: ModelOption) {
 
 		// New selection — start the locked-on smoothing track fresh for this person.
 		processorRef.current.resetFocused();
+		worldProcessorRef.current.resetFocused();
 		await updateFocusPoint({ x, y });
 		redisplayLastResult();
 	};
@@ -424,6 +474,7 @@ export default function useMediapipePose(initOptions: ModelOption) {
 
 	const handleClearFocusPoint = async () => {
 		processorRef.current.resetFocused();
+		worldProcessorRef.current.resetFocused();
 		await updateFocusPoint(null);
 		redisplayLastResult();
 	};
@@ -451,11 +502,12 @@ export default function useMediapipePose(initOptions: ModelOption) {
 		lastVideoTimeRef.current = -1;
 		// New clip / dimensions — drop any smoothing state carried from the previous source.
 		processorRef.current.reset();
+		worldProcessorRef.current.reset();
 	};
 
 	return {
-		refs: { imageRef, videoRef, canvasRef },
-		states: { focusPoint, focusPointRadius, maxFocusPointRadius, modelStatus, isWebcamActive, poseReadout },
+		refs: { imageRef, videoRef, canvasRef, worldLandmarksRef },
+		states: { focusPoint, focusPointRadius, maxFocusPointRadius, modelStatus, isWebcamActive },
 		actions: {
 			updateOptions,
 			updateFocusPointRadius,

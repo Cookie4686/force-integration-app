@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import useMediapipePose, { ModelOption } from "@/hooks/use-mediapipe-pose";
+import { DEFAULT_PROCESSING_SETTINGS, PoseProcessingSettings } from "@/lib/pose/processing";
 
 import PageToolPoseSectionProcessing from "./processing-section";
 
@@ -49,7 +50,13 @@ export default function PageToolPoseSectionConfig({
 }) {
 	const { states, actions } = mediapipePose;
 	const { focusPointRadius, maxFocusPointRadius, modelStatus, isWebcamActive } = states;
-	const { updateFocusPointRadius, startCamera, stopCamera } = actions;
+	const { updateFocusPointRadius, startCamera, stopCamera, updateProcessingSettings } = actions;
+
+	// Coordinate-display + signal-processing settings (shared across image/video).
+	const [processing, setProcessing] = useState<PoseProcessingSettings>(DEFAULT_PROCESSING_SETTINGS);
+	useEffect(() => {
+		updateProcessingSettings(processing);
+	}, [processing, updateProcessingSettings]);
 
 	const [type, setType] = useState(initOption.type);
 	const [numPose, setNumPose] = useState(initOption.numPoses || 1);
@@ -114,6 +121,7 @@ export default function PageToolPoseSectionConfig({
 						/>
 						<FieldDescription>Select an image to upload.</FieldDescription>
 					</Field>
+					<PageToolPoseSectionProcessing settings={processing} setSettings={setProcessing} showFilters={false} />
 				</TabsContent>
 				<TabsContent value="VIDEO">
 					<div className="flex flex-col gap-4">
@@ -148,7 +156,7 @@ export default function PageToolPoseSectionConfig({
 							</div>
 							<FieldDescription>Stream your camera for live pose detection.</FieldDescription>
 						</Field>
-						<PageToolPoseSectionProcessing mediapipePose={mediapipePose} />
+						<PageToolPoseSectionProcessing settings={processing} setSettings={setProcessing} showFilters />
 					</div>
 				</TabsContent>
 			</Tabs>

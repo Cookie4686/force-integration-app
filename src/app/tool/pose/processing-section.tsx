@@ -1,152 +1,154 @@
 "use client";
 
 import { SliderRootProps } from "@base-ui/react";
-import { useEffect, useState } from "react";
 
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
-import useMediapipePose from "@/hooks/use-mediapipe-pose";
-import { DEFAULT_PROCESSING_SETTINGS, PoseProcessingSettings } from "@/lib/pose/processing";
+import { PoseProcessingSettings } from "@/lib/pose/processing";
 
+// Controlled processing controls. The coordinate-display block is shown for both
+// image and video; the temporal filters (Confidence / One Euro / Kalman) only
+// make sense for a video stream, so they are gated behind `showFilters`.
 export default function PageToolPoseSectionProcessing({
-	mediapipePose,
+	settings,
+	setSettings,
+	showFilters,
 }: {
-	mediapipePose: ReturnType<typeof useMediapipePose>;
+	settings: PoseProcessingSettings;
+	setSettings: React.Dispatch<React.SetStateAction<PoseProcessingSettings>>;
+	showFilters: boolean;
 }) {
-	const { states, actions } = mediapipePose;
-	const { poseReadout } = states;
-	const { updateProcessingSettings } = actions;
-
-	const [settings, setSettings] = useState<PoseProcessingSettings>(DEFAULT_PROCESSING_SETTINGS);
-
-	// Push settings into the detection loop (cheap ref update, no worker reconfigure).
-	useEffect(() => {
-		updateProcessingSettings(settings);
-	}, [settings, updateProcessingSettings]);
-
 	return (
 		<div className="flex flex-col gap-4">
 			<Separator />
-			<Label className="text-base font-semibold">Signal Processing</Label>
+			<Label className="text-base font-semibold">Coordinate Display</Label>
+			<p className="text-muted-foreground text-xs">
+				Overlay each landmark&apos;s coordinates on the {showFilters ? "video" : "image"}.
+			</p>
 
-			{/* Confidence threshold */}
-			<ToggleField
-				label="Confidence Threshold"
-				description="Hide landmarks below a visibility likelihood."
-				checked={settings.confidenceThreshold.enabled}
-				onCheckedChange={(enabled) =>
-					setSettings((s) => ({ ...s, confidenceThreshold: { ...s.confidenceThreshold, enabled } }))
-				}
-			>
-				<SliderRow
-					label="Min Visibility"
-					value={settings.confidenceThreshold.value}
-					setValue={(value) =>
-						setSettings((s) => ({ ...s, confidenceThreshold: { ...s.confidenceThreshold, value } }))
-					}
+			<SwitchRow
+				label="Show X"
+				checked={settings.labels.showX}
+				onCheckedChange={(showX) => setSettings((s) => ({ ...s, labels: { ...s.labels, showX } }))}
+			/>
+			<SwitchRow
+				label="Show Y"
+				checked={settings.labels.showY}
+				onCheckedChange={(showY) => setSettings((s) => ({ ...s, labels: { ...s.labels, showY } }))}
+			/>
+			<SwitchRow
+				label="Show Z"
+				checked={settings.labels.showZ}
+				onCheckedChange={(showZ) => setSettings((s) => ({ ...s, labels: { ...s.labels, showZ } }))}
+			/>
+			<div className="flex items-center justify-between gap-2">
+				<div className="flex flex-col">
+					<Label htmlFor="coord-normalized">Normalize (0–1)</Label>
+					<span className="text-muted-foreground text-xs">
+						{settings.normalized ? "Values shown as 0–1 of the frame" : "Values shown as raw pixels"}
+					</span>
+				</div>
+				<Switch
+					id="coord-normalized"
+					checked={settings.normalized}
+					onCheckedChange={(normalized) => setSettings((s) => ({ ...s, normalized }))}
 				/>
-			</ToggleField>
+			</div>
 
-			{/* One Euro filter */}
-			<ToggleField
-				label="One Euro Filter"
-				description="Adaptive smoothing: less lag on fast motion, more smoothing when still."
-				checked={settings.oneEuro.enabled}
-				onCheckedChange={(enabled) => setSettings((s) => ({ ...s, oneEuro: { ...s.oneEuro, enabled } }))}
-			>
-				<SliderRow
-					label="Min Cutoff (Hz)"
-					value={settings.oneEuro.minCutoff}
-					setValue={(minCutoff) => setSettings((s) => ({ ...s, oneEuro: { ...s.oneEuro, minCutoff } }))}
-					min={0.1}
-					max={5}
-					step={0.1}
-				/>
-				<SliderRow
-					label="Beta"
-					value={settings.oneEuro.beta}
-					setValue={(beta) => setSettings((s) => ({ ...s, oneEuro: { ...s.oneEuro, beta } }))}
-					min={0}
-					max={0.5}
-					step={0.005}
-				/>
-			</ToggleField>
+			{showFilters && (
+				<>
+					<Separator />
+					<Label className="text-base font-semibold">Signal Processing</Label>
 
-			{/* Kalman filter */}
-			<ToggleField
-				label="Kalman Filter"
-				description="Random-walk smoothing. Stacks after One Euro when both are on."
-				checked={settings.kalman.enabled}
-				onCheckedChange={(enabled) => setSettings((s) => ({ ...s, kalman: { ...s.kalman, enabled } }))}
-			>
-				<SliderRow
-					label="Process Noise"
-					value={settings.kalman.processNoise}
-					setValue={(processNoise) => setSettings((s) => ({ ...s, kalman: { ...s.kalman, processNoise } }))}
-					min={0.0001}
-					max={0.1}
-					step={0.0001}
-				/>
-				<SliderRow
-					label="Measurement Noise"
-					value={settings.kalman.measurementNoise}
-					setValue={(measurementNoise) =>
-						setSettings((s) => ({ ...s, kalman: { ...s.kalman, measurementNoise } }))
-					}
-					min={0.001}
-					max={1}
-					step={0.001}
-				/>
-			</ToggleField>
+					<ToggleField
+						label="Confidence Threshold"
+						description="Hide landmarks below a visibility likelihood."
+						checked={settings.confidenceThreshold.enabled}
+						onCheckedChange={(enabled) =>
+							setSettings((s) => ({ ...s, confidenceThreshold: { ...s.confidenceThreshold, enabled } }))
+						}
+					>
+						<SliderRow
+							label="Min Visibility"
+							value={settings.confidenceThreshold.value}
+							setValue={(value) =>
+								setSettings((s) => ({ ...s, confidenceThreshold: { ...s.confidenceThreshold, value } }))
+							}
+						/>
+					</ToggleField>
 
-			{/* Pose-relative normalization */}
-			<ToggleField
-				label="Normalization"
-				description="Hip-centered, torso-scaled coordinates (first pose). Data only — overlay unchanged."
-				checked={settings.normalization.enabled}
-				onCheckedChange={(enabled) =>
-					setSettings((s) => ({ ...s, normalization: { ...s.normalization, enabled } }))
-				}
-			>
-				{poseReadout ?
-					<div className="bg-muted/40 flex flex-col gap-1 rounded border p-2 text-xs">
-						<div className="flex justify-between">
-							<span className="text-muted-foreground">Torso scale</span>
-							<span className="font-mono">{poseReadout.torsoScale.toFixed(4)}</span>
-						</div>
-						<div className="flex justify-between">
-							<span className="text-muted-foreground">Hip center (x, y)</span>
-							<span className="font-mono">
-								{poseReadout.hipCenter.x.toFixed(3)}, {poseReadout.hipCenter.y.toFixed(3)}
-							</span>
-						</div>
-						<Separator className="my-1" />
-						<div className="grid grid-cols-[1fr_auto_auto_auto] gap-x-2 font-mono">
-							<span className="text-muted-foreground">pt</span>
-							<span className="text-muted-foreground text-right">x</span>
-							<span className="text-muted-foreground text-right">y</span>
-							<span className="text-muted-foreground text-right">z</span>
-							{poseReadout.keyPoints.map((kp) => (
-								<Row key={kp.label} kp={kp} />
-							))}
-						</div>
-					</div>
-				:	<p className="text-muted-foreground text-xs">Waiting for a detected pose…</p>}
-			</ToggleField>
+					<ToggleField
+						label="One Euro Filter"
+						description="Adaptive smoothing: less lag on fast motion, more smoothing when still."
+						checked={settings.oneEuro.enabled}
+						onCheckedChange={(enabled) => setSettings((s) => ({ ...s, oneEuro: { ...s.oneEuro, enabled } }))}
+					>
+						<SliderRow
+							label="Min Cutoff (Hz)"
+							value={settings.oneEuro.minCutoff}
+							setValue={(minCutoff) => setSettings((s) => ({ ...s, oneEuro: { ...s.oneEuro, minCutoff } }))}
+							min={0.1}
+							max={5}
+							step={0.1}
+						/>
+						<SliderRow
+							label="Beta"
+							value={settings.oneEuro.beta}
+							setValue={(beta) => setSettings((s) => ({ ...s, oneEuro: { ...s.oneEuro, beta } }))}
+							min={0}
+							max={0.5}
+							step={0.005}
+						/>
+					</ToggleField>
+
+					<ToggleField
+						label="Kalman Filter"
+						description="Random-walk smoothing. Stacks after One Euro when both are on."
+						checked={settings.kalman.enabled}
+						onCheckedChange={(enabled) => setSettings((s) => ({ ...s, kalman: { ...s.kalman, enabled } }))}
+					>
+						<SliderRow
+							label="Process Noise"
+							value={settings.kalman.processNoise}
+							setValue={(processNoise) => setSettings((s) => ({ ...s, kalman: { ...s.kalman, processNoise } }))}
+							min={0.0001}
+							max={0.1}
+							step={0.0001}
+						/>
+						<SliderRow
+							label="Measurement Noise"
+							value={settings.kalman.measurementNoise}
+							setValue={(measurementNoise) =>
+								setSettings((s) => ({ ...s, kalman: { ...s.kalman, measurementNoise } }))
+							}
+							min={0.001}
+							max={1}
+							step={0.001}
+						/>
+					</ToggleField>
+				</>
+			)}
 		</div>
 	);
 }
 
-function Row({ kp }: { kp: { label: string; x: number; y: number; z: number } }) {
+function SwitchRow({
+	label,
+	checked,
+	onCheckedChange,
+}: {
+	label: string;
+	checked: boolean;
+	onCheckedChange: (checked: boolean) => void;
+}) {
+	const id = `coord-${label.toLowerCase().replaceAll(" ", "-")}`;
 	return (
-		<>
-			<span className="text-muted-foreground">{kp.label}</span>
-			<span className="text-right">{kp.x.toFixed(2)}</span>
-			<span className="text-right">{kp.y.toFixed(2)}</span>
-			<span className="text-right">{kp.z.toFixed(2)}</span>
-		</>
+		<div className="flex items-center justify-between gap-2">
+			<Label htmlFor={id}>{label}</Label>
+			<Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+		</div>
 	);
 }
 
