@@ -10,6 +10,13 @@ export interface PoseLandmarkerWorker {
 		inferenceTime: number;
 		result: PoseLandmarkerResult;
 	} | null;
+	detectForVideo(
+		imageBitmap: ImageBitmap,
+		timestampMs: number
+	): {
+		inferenceTime: number;
+		result: PoseLandmarkerResult;
+	} | null;
 }
 
 let poseLandmarker: PoseLandmarker | null = null;
@@ -55,16 +62,43 @@ const api: PoseLandmarkerWorker = {
 			return null;
 		}
 
-		const startTimeMs = performance.now();
-		const result = poseLandmarker.detect(imageBitmap);
-		const inferenceTime = performance.now() - startTimeMs;
+		try {
+			const startTimeMs = performance.now();
+			const result = poseLandmarker.detect(imageBitmap);
+			const inferenceTime = performance.now() - startTimeMs;
 
-		imageBitmap.close();
+			return {
+				inferenceTime,
+				result,
+			};
+		} catch {
+			// e.g. called while the model is still in VIDEO running mode
+			return null;
+		} finally {
+			imageBitmap.close();
+		}
+	},
 
-		return {
-			inferenceTime,
-			result,
-		};
+	detectForVideo(imageBitmap, timestampMs) {
+		if (isInitializing || !poseLandmarker) {
+			return null;
+		}
+
+		try {
+			const startTimeMs = performance.now();
+			const result = poseLandmarker.detectForVideo(imageBitmap, timestampMs);
+			const inferenceTime = performance.now() - startTimeMs;
+
+			return {
+				inferenceTime,
+				result,
+			};
+		} catch {
+			// e.g. called while the model is still in IMAGE running mode
+			return null;
+		} finally {
+			imageBitmap.close();
+		}
 	},
 };
 

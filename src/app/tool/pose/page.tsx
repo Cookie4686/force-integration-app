@@ -7,6 +7,7 @@ import useMediapipePose, { ModelOption } from "@/hooks/use-mediapipe-pose";
 
 import PageToolPoseSectionConfig from "./config-section";
 import PageToolPoseSectionImage from "./image-section";
+import PageToolPoseSectionVideo from "./video-section";
 
 const initOptions: ModelOption = {
 	type: "lite",
@@ -21,6 +22,7 @@ export default function PageToolPose() {
 	const { updateOptions } = mediapipePose.actions;
 
 	const [imageFile, setImageFile] = useState<File | null>(null);
+	const [videoFile, setVideoFile] = useState<File | null>(null);
 	const [mode, setMode] = useState<ModelOption["runningMode"]>(initOptions.runningMode);
 
 	const [options, setOptions] = useState(initOptions);
@@ -36,7 +38,7 @@ export default function PageToolPose() {
 		<div className="flex justify-between gap-2 p-2" style={{ height: "inherit" }}>
 			<div className="w-full overflow-y-scroll rounded border p-2">
 				{mode === "VIDEO" ?
-					<p>WIP</p>
+					<PageToolPoseSectionVideo mediapipePose={mediapipePose} videoFile={videoFile} />
 				:	<PageToolPoseSectionImage mediapipePose={mediapipePose} imageFile={imageFile} />}
 			</div>
 			<div className="w-xs overflow-y-scroll rounded border p-2">
@@ -46,6 +48,7 @@ export default function PageToolPose() {
 					setModeAction={setMode}
 					setOptionAction={setOptions}
 					setFileAction={setImageFile}
+					setVideoFileAction={setVideoFile}
 					mediapipePose={mediapipePose}
 				/>
 			</div>

@@ -34,6 +34,7 @@ export default function PageToolPoseSectionConfig({
 	setModeAction,
 	setOptionAction,
 	setFileAction: setFileAction,
+	setVideoFileAction,
 	mediapipePose,
 }: {
 	initOption: ModelOption;
@@ -41,11 +42,12 @@ export default function PageToolPoseSectionConfig({
 	setModeAction: React.Dispatch<React.SetStateAction<ModelOption["runningMode"]>>;
 	setOptionAction: React.Dispatch<React.SetStateAction<ModelOption>>;
 	setFileAction: React.Dispatch<React.SetStateAction<File | null>>;
+	setVideoFileAction: React.Dispatch<React.SetStateAction<File | null>>;
 	mediapipePose: ReturnType<typeof useMediapipePose>;
 }) {
 	const { states, actions } = mediapipePose;
-	const { focusPointRadius, maxFocusPointRadius, modelStatus } = states;
-	const { updateFocusPointRadius } = actions;
+	const { focusPointRadius, maxFocusPointRadius, modelStatus, isWebcamActive } = states;
+	const { updateFocusPointRadius, startCamera, stopCamera } = actions;
 
 	const [type, setType] = useState(initOption.type);
 	const [numPose, setNumPose] = useState(initOption.numPoses || 1);
@@ -63,6 +65,13 @@ export default function PageToolPoseSectionConfig({
 		}
 	};
 
+	const onInputVideoFileChange: React.ChangeEventHandler<HTMLInputElement> = (e) => {
+		const file = e.target.files?.[0];
+		if (file) {
+			setVideoFileAction(file);
+		}
+	};
+
 	// TODO: might convert this use effect to something else
 	useEffect(() => {
 		setOptionAction({
@@ -73,9 +82,9 @@ export default function PageToolPoseSectionConfig({
 			minPosePresenceConfidence: minPresence,
 			minTrackingConfidence: minTracking,
 			outputSegmentationMasks: false,
-			runningMode: "IMAGE",
+			runningMode: mode,
 		});
-	}, [type, numPose, minDetect, minPresence, minTracking, isDelegateGPU, setOptionAction]);
+	}, [type, numPose, minDetect, minPresence, minTracking, isDelegateGPU, mode, setOptionAction]);
 
 	return (
 		<div className="flex flex-col gap-4">
@@ -105,11 +114,39 @@ export default function PageToolPoseSectionConfig({
 					</Field>
 				</TabsContent>
 				<TabsContent value="VIDEO">
-					<Field>
-						<FieldLabel htmlFor="config-slider-video">File Upload</FieldLabel>
-						<Input className="cursor-pointer" id="config-slider-video" type="file" accept="video/*" disabled />
-						<FieldDescription>Select a video clip to upload. (WIP)</FieldDescription>
-					</Field>
+					<div className="flex flex-col gap-4">
+						<Field>
+							<FieldLabel htmlFor="config-slider-video">File Upload</FieldLabel>
+							<Input
+								className="cursor-pointer"
+								id="config-slider-video"
+								type="file"
+								accept="video/*"
+								disabled={isWebcamActive}
+								onChange={onInputVideoFileChange}
+							/>
+							<FieldDescription>Select a video clip to upload.</FieldDescription>
+						</Field>
+						<Field>
+							<div className="flex items-center space-x-2">
+								<Switch
+									id="config-webcam"
+									checked={isWebcamActive}
+									onCheckedChange={(value) => {
+										if (value) {
+											startCamera().catch(() => {
+												// permission denied / no camera — leave the switch off
+											});
+										} else {
+											stopCamera();
+										}
+									}}
+								/>
+								<Label htmlFor="config-webcam">Use Webcam</Label>
+							</div>
+							<FieldDescription>Stream your camera for live pose detection.</FieldDescription>
+						</Field>
+					</div>
 				</TabsContent>
 			</Tabs>
 			<Separator />
