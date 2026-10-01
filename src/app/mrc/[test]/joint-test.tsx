@@ -7,24 +7,25 @@ import { useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { MRC_JOINTS, MrcJoint } from "@/lib/mrc/joints";
+import { MRC_SIDE_LABEL, MRC_TESTS, MrcTest } from "@/lib/mrc/joints";
 import { createMockSession, MrcSession } from "@/lib/mrc/session";
 
 import CameraView from "./camera-view";
 import { AngleDashboardCard, FormStatusCard, RecommendationsCard, SessionCard } from "./session-cards";
 
 export default function JointTest({
-	joint,
+	test,
 	isSequence,
-	nextJoint,
+	nextTest,
 }: {
-	joint: MrcJoint;
+	test: MrcTest;
 	isSequence: boolean;
-	nextJoint?: MrcJoint;
+	nextTest?: MrcTest;
 }) {
+	const { joint } = test;
 	// TODO: replace the mock with live data from the pose model.
-	const [session, setSession] = useState<MrcSession>(() => createMockSession(joint));
-	const index = MRC_JOINTS.findIndex(({ id }) => id === joint.id);
+	const [session, setSession] = useState<MrcSession>(() => createMockSession(test));
+	const index = MRC_TESTS.findIndex(({ id }) => id === test.id);
 
 	const setStatus = (status: MrcSession["status"]) => setSession((prev) => ({ ...prev, status }));
 
@@ -39,13 +40,13 @@ export default function JointTest({
 				{isSequence && (
 					<div className="flex items-center gap-3">
 						<span className="text-muted-foreground text-sm font-medium">
-							Test {index + 1} of {MRC_JOINTS.length}
+							Test {index + 1} of {MRC_TESTS.length}
 						</span>
 						<div className="flex gap-1">
-							{MRC_JOINTS.map(({ id }, idx) => (
+							{MRC_TESTS.map(({ id }, idx) => (
 								<div
 									className={cn(
-										"h-1.5 w-6 rounded-full",
+										"h-1.5 w-3 rounded-full",
 										idx < index ? "bg-primary"
 										: idx === index ? "bg-primary/50"
 										: "bg-muted"
@@ -62,7 +63,10 @@ export default function JointTest({
 			<div className="flex flex-col gap-1">
 				<span className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">Current Activity</span>
 				<div className="flex items-center gap-3">
-					<h2 className="text-3xl font-bold">{joint.name} Test</h2>
+					<h2 className="text-3xl font-bold">
+						{MRC_SIDE_LABEL[test.side]} {joint.name} Test
+					</h2>
+					<Badge>{MRC_SIDE_LABEL[test.side]} side</Badge>
 					<Badge variant="outline">{joint.region}</Badge>
 				</div>
 			</div>
@@ -90,7 +94,7 @@ export default function JointTest({
 								{session.status === "paused" ? "Resume" : "Start"}
 							</Button>
 						}
-						<Button size="lg" variant="outline" onClick={() => setSession(createMockSession(joint))}>
+						<Button size="lg" variant="outline" onClick={() => setSession(createMockSession(test))}>
 							<RotateCcwIcon />
 							Reset
 						</Button>
@@ -99,11 +103,13 @@ export default function JointTest({
 						{isSequence && (
 							<Link
 								className={buttonVariants({ size: "lg", variant: "outline", className: "ml-auto" })}
-								href={nextJoint ? `/mrc/${nextJoint.id}?mode=sequence` : "/mrc"}
+								href={nextTest ? `/mrc/${nextTest.id}?mode=sequence` : "/mrc"}
 							>
-								{nextJoint ?
+								{nextTest ?
 									<>
-										<span>Next: {nextJoint.name}</span>
+										<span>
+											Next: {MRC_SIDE_LABEL[nextTest.side]} {nextTest.joint.name}
+										</span>
 										<ChevronRight size={16} />
 									</>
 								:	<>

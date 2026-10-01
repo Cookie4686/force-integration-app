@@ -8,7 +8,7 @@ import { Fragment } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { MRC_JOINTS } from "@/lib/mrc/joints";
+import { MRC_JOINTS, MRC_SIDE_LABEL, MRC_TESTS } from "@/lib/mrc/joints";
 
 // TODO: แก้ให้เป็นของจริงด้วย
 const PREPARATION_STEPS = [
@@ -45,7 +45,7 @@ export default function PageMRC() {
 			<section className="flex flex-col gap-4">
 				<SectionTitle
 					title="Full Test"
-					description="Runs all 6 tests in order. Each test moves on to the next automatically."
+					description={`Runs all ${MRC_TESTS.length} tests in order — each joint on the right side, then the left. Each test moves on to the next automatically.`}
 				/>
 				<Card className="border-primary/40 bg-primary/5">
 					<CardContent className="flex items-center justify-between gap-6 max-md:flex-col max-md:items-start">
@@ -59,7 +59,8 @@ export default function PageMRC() {
 									<Fragment key={joint.id}>
 										{idx > 0 && <ChevronRight size={14} />}
 										<span className="bg-background rounded-md border px-2 py-0.5">
-											{idx + 1}. {joint.name}
+											{idx + 1}. {joint.name}{" "}
+											<span className="text-xs">({joint.sides.map((side) => MRC_SIDE_LABEL[side][0]).join(", ")})</span>
 										</span>
 									</Fragment>
 								))}
@@ -67,7 +68,7 @@ export default function PageMRC() {
 						</div>
 						<Link
 							className={buttonVariants({ size: "lg", className: "h-11 px-6 text-base" })}
-							href={`/mrc/${MRC_JOINTS[0].id}?mode=sequence`}
+							href={`/mrc/${MRC_TESTS[0].id}?mode=sequence`}
 						>
 							<PlayIcon />
 							<span>Start all tests</span>
@@ -80,7 +81,7 @@ export default function PageMRC() {
 
 			{/* Section 2: individual tests */}
 			<section className="flex flex-col gap-4">
-				<SectionTitle title="Individual Test" description="Run a single joint test on its own." />
+				<SectionTitle title="Individual Test" description="Run a single joint test on one side." />
 				<div className="grid grid-cols-3 gap-6 max-md:grid-cols-1">
 					{MRC_JOINTS.map((joint, idx) => (
 						<Card className="py-6" key={joint.id}>
@@ -94,17 +95,20 @@ export default function PageMRC() {
 							<CardContent className="h-full">
 								<p className="text-muted-foreground text-sm">{joint.description}</p>
 							</CardContent>
-							<CardFooter>
-								<Link
-									className={cn(
-										buttonVariants({ variant: "outline", size: "lg" }),
-										"border-blue-500 dark:border-blue-400"
-									)}
-									href={`/mrc/${joint.id}`}
-								>
-									<span>Start test</span>
-									<ChevronRight size={16} />
-								</Link>
+							<CardFooter className="gap-2">
+								{joint.sides.map((side) => (
+									<Link
+										className={cn(
+											buttonVariants({ variant: "outline", size: "lg" }),
+											"flex-1 border-blue-500 dark:border-blue-400"
+										)}
+										href={`/mrc/${joint.id}-${side}`}
+										key={side}
+									>
+										<span>{MRC_SIDE_LABEL[side]}</span>
+										<ChevronRight size={16} />
+									</Link>
+								))}
 							</CardFooter>
 						</Card>
 					))}

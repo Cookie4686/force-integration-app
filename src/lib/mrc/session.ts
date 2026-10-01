@@ -1,19 +1,19 @@
-// Live state of one joint test, as shown on /mrc/[joint].
+// Live state of one test (a joint on one side), as shown on /mrc/[test].
 //
 // This is the contract between the test UI and the pose model: the UI only
 // renders an `MrcSession`, and the model integration is responsible for
 // producing one every frame. Static per-joint configuration (which landmarks,
 // target angles, …) lives in joints.ts; this file holds what changes at runtime.
 
-import { MrcJoint } from "./joints";
+import { getMeasureLabel, MrcTest } from "./joints";
 
 export type MrcSessionStatus = "ready" | "running" | "paused" | "finished";
 
 export type MrcStatusLevel = "good" | "warning" | "bad" | "unknown";
 
-// A measured quantity compared against a target. `angle` is in degrees,
-// `alignment` is a distance in centimetres. `value` is null when the model
-// cannot measure it this frame (e.g. landmark not visible).
+// Live reading of one of the joint's `measures` (same order). `angle` is in
+// degrees, `alignment` in centimetres. `value` is null when the model cannot
+// measure it this frame (e.g. landmark not visible).
 export type MrcMetric = {
 	id: string;
 	kind: "angle" | "alignment";
@@ -49,18 +49,23 @@ export const getMetricLevel = ({ value, target, tolerance }: MrcMetric): MrcStat
 	);
 };
 
+// MOCK: fake readings (in tolerance units below target) so each status colour shows up.
+const MOCK_DEVIATIONS = [-0.6, -1.4, -2.5];
+
 // MOCK: placeholder values so the layout can be reviewed before the model is
 // connected. Replace with real data from the model integration.
-export const createMockSession = (joint: MrcJoint): MrcSession => ({
+export const createMockSession = ({ joint, measures }: MrcTest): MrcSession => ({
 	status: "ready",
 	repetitionsDone: 2,
 	progress: 0.4,
-	metrics: [
-		{ id: "primary", kind: "angle", label: `${joint.name} angle`, value: 142, target: 150, tolerance: 10 },
-		{ id: "secondary", kind: "angle", label: "Trunk lean", value: 18, target: 0, tolerance: 8 },
-		{ id: "alignment", kind: "alignment", label: "Left–right alignment", value: 1.2, target: 0, tolerance: 2 },
-		{ id: "hidden", kind: "angle", label: "Opposite side", value: null, target: 150, tolerance: 10 },
-	],
+	metrics: measures.map((measure, idx) => ({
+		id: String(idx),
+		kind: measure.kind,
+		label: getMeasureLabel(measure),
+		value: measure.target + measure.tolerance * MOCK_DEVIATIONS[idx % MOCK_DEVIATIONS.length],
+		target: measure.target,
+		tolerance: measure.tolerance,
+	})),
 	form: {
 		level: "warning",
 		message: "Minor adjustment needed",

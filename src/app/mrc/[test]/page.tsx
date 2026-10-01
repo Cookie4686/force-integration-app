@@ -1,21 +1,21 @@
 import { notFound } from "next/navigation";
 
-import { getMrcJoint, MRC_JOINTS } from "@/lib/mrc/joints";
+import { getMrcTest, MRC_TESTS } from "@/lib/mrc/joints";
 
 import JointTest from "./joint-test";
 
 export function generateStaticParams() {
-	return MRC_JOINTS.map(({ id }) => ({ joint: id }));
+	return MRC_TESTS.map(({ id }) => ({ test: id }));
 }
 
-export default async function PageMRCJoint({ params, searchParams }: PageProps<"/mrc/[joint]">) {
-	const joint = getMrcJoint((await params).joint);
-	if (!joint) notFound();
+export default async function PageMRCTest({ params, searchParams }: PageProps<"/mrc/[test]">) {
+	const test = getMrcTest((await params).test);
+	if (!test) notFound();
 
-	// `?mode=sequence` → part of the full test; otherwise a single joint test.
+	// `?mode=sequence` → part of the full test; otherwise a single test.
 	const isSequence = (await searchParams).mode === "sequence";
-	const nextJoint = isSequence ? MRC_JOINTS[MRC_JOINTS.indexOf(joint) + 1] : undefined;
+	const nextTest = isSequence ? MRC_TESTS[MRC_TESTS.indexOf(test) + 1] : undefined;
 
-	// key: start a fresh session (and camera) when moving to the next joint.
-	return <JointTest key={joint.id} joint={joint} isSequence={isSequence} nextJoint={nextJoint} />;
+	// key: start a fresh session (and camera) when moving to the next test.
+	return <JointTest key={test.id} test={test} isSequence={isSequence} nextTest={nextTest} />;
 }

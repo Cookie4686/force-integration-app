@@ -101,7 +101,7 @@ export function AngleDashboardCard({ metrics }: { metrics: MrcMetric[] }) {
 function MetricRow({ metric }: { metric: MrcMetric }) {
 	const { kind, label, value, target, tolerance } = metric;
 	const style = LEVEL_STYLE[getMetricLevel(metric)];
-	const offset = value === null ? null : value - target;
+	const deviation = value === null ? null : value - target;
 
 	return (
 		<div className="flex flex-col gap-2 rounded-lg border p-3">
@@ -109,8 +109,7 @@ function MetricRow({ metric }: { metric: MrcMetric }) {
 				<div className="flex flex-col">
 					<span className="text-sm font-medium">{label}</span>
 					<span className="text-muted-foreground text-xs">
-						{kind === "angle" ? "Angle" : "Alignment"} · Target {formatMetric(kind, target)} ±{" "}
-						{formatMetric(kind, tolerance)}
+						Target {formatMetric(kind, target)} · Tolerance ±{formatMetric(kind, tolerance)}
 					</span>
 				</div>
 				<span className={cn("text-2xl font-bold tabular-nums", style.text)}>
@@ -120,7 +119,7 @@ function MetricRow({ metric }: { metric: MrcMetric }) {
 			<RangeBar metric={metric} markerClassName={style.marker} />
 			<div className="flex justify-between text-xs">
 				<span className="text-muted-foreground tabular-nums">
-					Offset {offset === null ? "—" : (offset > 0 ? "+" : "") + formatMetric(kind, offset)}
+					Deviation {deviation === null ? "—" : (deviation > 0 ? "+" : "") + formatMetric(kind, deviation)}
 				</span>
 				<span className={cn("font-medium", style.text)}>{style.label}</span>
 			</div>
