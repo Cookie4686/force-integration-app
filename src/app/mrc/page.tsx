@@ -1,14 +1,15 @@
 "use client";
 
 import { cn } from "cn";
-import { ChevronRight, ListOrderedIcon, PlayIcon } from "lucide-react";
+import { ChevronRight, HandIcon, ListOrderedIcon, PlayIcon, WeightIcon } from "lucide-react";
 import Link from "next/link";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { MRC_JOINTS, MRC_SIDE_LABEL, MRC_TESTS } from "@/lib/mrc/joints";
+import { mrcTestHref } from "@/lib/mrc/routes";
 
 // TODO: แก้ให้เป็นของจริงด้วย
 const PREPARATION_STEPS = [
@@ -18,7 +19,27 @@ const PREPARATION_STEPS = [
 	"Allow camera access when the browser asks.",
 ];
 
+const TEST_MODES = [
+	{
+		manual: false,
+		icon: WeightIcon,
+		title: "With force device",
+		description: "Repetitions follow the Bluetooth force reading.",
+		note: "In development",
+	},
+	{
+		manual: true,
+		icon: HandIcon,
+		title: "Without force",
+		description: "The doctor taps the camera screen to start and stop each repetition.",
+		note: null,
+	},
+];
+
 export default function PageMRC() {
+	// No force device available yet, so manual mode is the default.
+	const [manual, setManual] = useState(true);
+
 	return (
 		<div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-8 py-12">
 			{/* Header */}
@@ -40,6 +61,52 @@ export default function PageMRC() {
 					</ol>
 				</CardContent>
 			</Card>
+
+			{/* Test mode: with or without the force device */}
+			<section className="flex flex-col gap-4">
+				<SectionTitle title="Test Mode" description="Choose how repetitions are started and stopped." />
+				<div className="grid grid-cols-2 gap-4 max-md:grid-cols-1" role="radiogroup">
+					{TEST_MODES.map((mode) => {
+						const selected = manual === mode.manual;
+						return (
+							<button
+								className={cn(
+									"flex items-start gap-3 rounded-xl border-2 p-4 text-left transition-colors",
+									selected ? "border-primary bg-primary/5" : (
+										"hover:bg-muted ring-foreground/10 border-transparent ring-1"
+									)
+								)}
+								key={mode.title}
+								role="radio"
+								aria-checked={selected}
+								onClick={() => setManual(mode.manual)}
+							>
+								<div
+									className={cn(
+										"flex size-10 shrink-0 items-center justify-center rounded-md border",
+										selected && "bg-primary text-primary-foreground border-primary"
+									)}
+								>
+									<mode.icon size={20} />
+								</div>
+								<div className="flex flex-col gap-1">
+									<span className="flex items-center gap-2 font-semibold">
+										{mode.title}
+										{mode.note && (
+											<span className="text-muted-foreground rounded-full border px-2 text-xs font-normal">
+												{mode.note}
+											</span>
+										)}
+									</span>
+									<span className="text-muted-foreground text-sm">{mode.description}</span>
+								</div>
+							</button>
+						);
+					})}
+				</div>
+			</section>
+
+			<Separator />
 
 			{/* Section 1: full test (all joints in sequence) */}
 			<section className="flex flex-col gap-4">
@@ -68,7 +135,7 @@ export default function PageMRC() {
 						</div>
 						<Link
 							className={buttonVariants({ size: "lg", className: "h-11 px-6 text-base" })}
-							href={`/mrc/${MRC_TESTS[0].id}?mode=sequence`}
+							href={mrcTestHref(MRC_TESTS[0].id, { sequence: true, manual })}
 						>
 							<PlayIcon />
 							<span>Start all tests</span>
@@ -102,7 +169,7 @@ export default function PageMRC() {
 											buttonVariants({ variant: "outline", size: "lg" }),
 											"flex-1 border-blue-500 dark:border-blue-400"
 										)}
-										href={`/mrc/${joint.id}-${side}`}
+										href={mrcTestHref(`${joint.id}-${side}`, { sequence: false, manual })}
 										key={side}
 									>
 										<span>{MRC_SIDE_LABEL[side]}</span>

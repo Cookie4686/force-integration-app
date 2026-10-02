@@ -12,10 +12,13 @@ export default async function PageMRCTest({ params, searchParams }: PageProps<"/
 	const test = getMrcTest((await params).test);
 	if (!test) notFound();
 
+	const query = await searchParams;
 	// `?mode=sequence` → part of the full test; otherwise a single test.
-	const isSequence = (await searchParams).mode === "sequence";
+	const isSequence = query.mode === "sequence";
+	// `?force=off` → without force device; the doctor taps the screen to start/stop repetitions.
+	const isManual = query.force === "off";
 	const nextTest = isSequence ? MRC_TESTS[MRC_TESTS.indexOf(test) + 1] : undefined;
 
 	// key: start a fresh session (and camera) when moving to the next test.
-	return <JointTest key={test.id} test={test} isSequence={isSequence} nextTest={nextTest} />;
+	return <JointTest key={test.id} test={test} isSequence={isSequence} isManual={isManual} nextTest={nextTest} />;
 }

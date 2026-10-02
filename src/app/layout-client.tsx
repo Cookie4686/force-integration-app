@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "cn";
-import { ActivityIcon, ChevronDownIcon, HomeIcon, PersonStandingIcon } from "lucide-react";
+import { ActivityIcon, BluetoothIcon, ChevronDownIcon, HomeIcon, PersonStandingIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Fragment, useContext, useEffect, useMemo, useState } from "react";
@@ -38,7 +38,10 @@ const navItems: NavItems = [
 	},
 	{
 		groupLabel: "Tools",
-		items: [{ title: "Pose", url: "/tool/pose", icon: PersonStandingIcon }],
+		items: [
+			{ title: "Pose", url: "/tool/pose", icon: PersonStandingIcon },
+			{ title: "Bluetooth", url: "/tool/bluetooth", icon: BluetoothIcon },
+		],
 	},
 ];
 

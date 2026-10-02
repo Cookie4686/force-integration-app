@@ -33,12 +33,38 @@ const STATUS_SCREEN: Record<
 	},
 };
 
-export default function CameraView({ mirrored = true, children }: { mirrored?: boolean; children?: React.ReactNode }) {
+export default function CameraView({
+	mirrored = true,
+	onScreenClick,
+	children,
+}: {
+	mirrored?: boolean;
+	// When set, the whole camera screen acts as a button (e.g. tap to start/stop a repetition).
+	onScreenClick?: () => void;
+	children?: React.ReactNode;
+}) {
 	const { videoRef, status, retry } = useCamera();
 	const screen = status === "active" ? null : STATUS_SCREEN[status];
+	const isClickable = onScreenClick !== undefined && status === "active";
 
 	return (
-		<div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black">
+		<div
+			className={cn(
+				"relative aspect-video w-full overflow-hidden rounded-xl bg-black select-none",
+				isClickable && "focus-visible:ring-primary cursor-pointer outline-none focus-visible:ring-4"
+			)}
+			{...(isClickable && {
+				role: "button",
+				tabIndex: 0,
+				onClick: onScreenClick,
+				onKeyDown: (event: React.KeyboardEvent) => {
+					if (event.key === "Enter" || event.key === " ") {
+						event.preventDefault();
+						onScreenClick();
+					}
+				},
+			})}
+		>
 			{/* Video + overlay canvas are mirrored together so drawn landmarks stay aligned. */}
 			<div className={cn("absolute inset-0", mirrored && "-scale-x-100")}>
 				<video className="h-full w-full object-contain" ref={videoRef} muted playsInline autoPlay />

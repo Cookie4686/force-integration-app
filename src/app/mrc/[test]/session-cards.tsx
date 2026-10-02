@@ -45,7 +45,16 @@ const formatMetric = (kind: MrcMetric["kind"], value: number) =>
 
 // --- Session -----------------------------------------------------------------
 
-export function SessionCard({ session, repetitions }: { session: MrcSession; repetitions: number }) {
+export function SessionCard({
+	session,
+	repetitions,
+	repDurationsMs,
+}: {
+	session: MrcSession;
+	repetitions: number;
+	// Duration of each completed repetition, when known (manual mode).
+	repDurationsMs?: number[];
+}) {
 	return (
 		<Card>
 			<CardHeader className="flex items-center justify-between">
@@ -76,6 +85,18 @@ export function SessionCard({ session, repetitions }: { session: MrcSession; rep
 					<ProgressLabel>Session timeline</ProgressLabel>
 					<ProgressValue />
 				</Progress>
+				{repDurationsMs && repDurationsMs.length > 0 && (
+					<div className="flex flex-col gap-2">
+						<span className="text-sm font-medium">Repetition time</span>
+						<div className="flex flex-wrap gap-1.5">
+							{repDurationsMs.map((durationMs, idx) => (
+								<span className="rounded-md border px-2 py-0.5 text-xs tabular-nums" key={idx}>
+									#{idx + 1} · {(durationMs / 1000).toFixed(1)} s
+								</span>
+							))}
+						</div>
+					</div>
+				)}
 			</CardContent>
 		</Card>
 	);
