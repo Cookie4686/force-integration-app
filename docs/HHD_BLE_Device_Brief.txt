@@ -1,0 +1,226 @@
+HHD (HAND-HELD DYNAMOMETER) — BLE DEVICE INTEGRATION BRIEF
+===========================================================
+
+PURPOSE OF THIS FILE
+--------------------
+This file describes a Bluetooth Low Energy (BLE) force-measurement device so
+that a new project can connect to it and read its data. The hardware and
+firmware already exist and must NOT be changed. Build the client side
+(app/script) to match this protocol exactly.
+
+Source of truth: an existing Flutter app (flutter_blue_plus) that already talks
+to this device successfully. Everything below is taken from that working
+implementation and its protocol spec.
+
+
+1. HARDWARE
+-----------
+- MCU: ESP32-S3 (BLE 5.0, NimBLE stack)
+- Sensor: load cell -> HX711 24-bit ADC
+- The device calibrates on-board and sends force already converted to kilograms.
+- Sample rate is NOT fixed. The firmware streams at the HX711 hardware rate:
+    ~10 Hz on a stock board (HX711 RATE pin tied to GND)
+    ~80 Hz if the RATE pin is tied high
+  Always build time series from the device timestamps, never assume a rate.
+
+
+2. GATT STRUCTURE
+-----------------
+Service UUID:          4FAFC201-1FB5-459E-8FCC-C5C9C331914B
+
+Characteristic         UUID                                   Properties     Direction
+---------------------  -------------------------------------  -------------  -------------
+Force Measurement      BEB5483E-36E1-4688-B7F5-EA07361B26A8   NOTIFY         device -> client
+Device Command         BEB5483F-36E1-4688-B7F5-EA07361B26A8   WRITE          client -> device
+Device Status          BEB54840-36E1-4688-B7F5-EA07361B26A8   READ, NOTIFY   device -> client
+Device Info            BEB54841-36E1-4688-B7F5-EA07361B26A8   READ           device -> client
+
+Advertising:
+- Service UUID is in the primary advertising packet.
+- Device name is "HHD-XXXXXX" (last 3 bytes of chip MAC, e.g. "HHD-9FC114"),
+  carried in the scan response. Some older firmware may advertise "HHD-02".
+- RECOMMENDED: filter scans by the SERVICE UUID, not by name.
+
+Connection parameters:
+- Request MTU = 64 bytes (default 23 is too small for a 44-byte notification).
+- On Android, request high connection priority.
+- Connection interval ~20 ms, supervision timeout ~4000 ms.
+- Writes to Device Command use write-WITH-response.
+
+ENDIANNESS: ALL multi-byte fields are LITTLE-ENDIAN.
+
+
+3. FORCE MEASUREMENT NOTIFICATION (main data stream)
+----------------------------------------------------
+Each notification contains N sample blocks of exactly 11 bytes, with NO header.
+N = packet_length / 11. Firmware normally sends 4 samples = 44 bytes.
+If packet_length is 0 or not a multiple of 11 -> discard the packet as corrupt.
+
+Sample block layout (11 bytes):
+
+  Offset  Size  Type        Field            Meaning
+  ------  ----  ----------  ---------------  ------------------------------------------
+  0       2     uint16 LE   sequence_number  +1 per sample, wraps 65535 -> 0
+  2       4     uint32 LE   timestamp_ms     ms since stream start (device clock)
+  6       4     float32 LE  force_value      force in KILOGRAMS (kgf), calibrated
+  10      1     uint8       device_status    0 = normal, 3 = overload/error
+
+Packet-loss detection:
+  expected = (last_seq + 1) & 0xFFFF
+  if seq != expected: lost += (seq - expected) & 0xFFFF
+  Reset last_seq when a new stream starts (after START_STREAM) or on disconnect.
+
+Unit conversions (from kg):
+  Newtons      N  = kg * 9.80665
+  Pounds-force lb = kg * 2.20462
+  Millinewtons mN = round(kg * 9806.65)   (the original app stores integer mN)
+
+EXAMPLE: 44-byte notification (hex), 4 samples:
+  64 00  E8 03 00 00  00 00 00 00  00
+  65 00  4C 04 00 00  00 00 20 40  00
+  66 00  B0 04 00 00  00 00 24 41  00
+  67 00  14 05 00 00  00 00 78 41  00
+
+Decoded:
+  [
+    {"sequence_number": 100, "timestamp_ms": 1000, "force_kg": 0.0,   "device_status": 0},
+    {"sequence_number": 101, "timestamp_ms": 1100, "force_kg": 2.5,   "device_status": 0},
+    {"sequence_number": 102, "timestamp_ms": 1200, "force_kg": 10.25, "device_status": 0},
+    {"sequence_number": 103, "timestamp_ms": 1300, "force_kg": 15.5,  "device_status": 0}
+  ]
+
+Single-sample example (11 bytes):
+  65 00         -> sequence_number = 101
+  E8 03 00 00   -> timestamp_ms    = 1000
+  00 00 78 41   -> force_value     = 15.5 kg
+  00            -> device_status   = 0 (normal)
+
+
+4. DEVICE STATUS (READ + NOTIFY, 3 bytes)
+-----------------------------------------
+  Byte  Field         Values
+  ----  ------------  ---------------------------------------------------------
+  0     status_code   0x00 IDLE (ready)
+                      0x01 TARING (zeroing)
+                      0x02 STREAMING
+                      0x03 ERROR (see error_code)
+                      0x04 LOW_BATTERY (proactive push)
+  1     error_code    0x00 none
+                      0x01 HX711 not responding
+                      0x02 tare timeout (>2 s)
+                      0x03 ADC overflow / calibration read failure
+  2     battery_pct   0-100
+
+Example: 02 00 57 -> STREAMING, no error, battery 87%
+Ignore status packets shorter than 3 bytes.
+
+Every command produces a Status notification as its response.
+LOW_BATTERY is pushed once when battery crosses 20% and once at 10%.
+
+
+5. DEVICE INFO (READ, 21 bytes)
+-------------------------------
+  Bytes   Field             Notes
+  ------  ----------------  ---------------------------------------------
+  0-15    device_name       UTF-8, null-padded (strip 0x00 bytes)
+  16-19   firmware_version  major, minor, patch, build (1 byte each)
+                            display as "v{major}.{minor}.{patch}"
+  20      battery_pct       0-100
+
+Example:
+  48 48 44 2D 39 46 43 31 31 34 00 00 00 00 00 00  01 00 03 00  57
+  -> name "HHD-9FC114", firmware v1.0.3, battery 87%
+If fewer than 21 bytes are returned, treat info as unavailable.
+
+
+6. DEVICE COMMAND (WRITE)
+-------------------------
+Format: [command_id (uint8), payload_len (uint8), payload bytes...]
+
+  Command           id    Payload                       Bytes example            Status response
+  ----------------  ----  ----------------------------  -----------------------  -------------------------
+  TARE              0x01  none                          01 00                    TARING -> IDLE
+  START_STREAM      0x02  none                          02 00                    STREAMING
+  STOP_STREAM       0x03  none                          03 00                    IDLE
+  GET_STATUS        0x04  none                          04 00                    current status
+  SET_CALIBRATION   0x05  float32 LE counts-per-kg      05 04 xx xx xx xx        IDLE
+  CAL_CAPTURE_ZERO  0x06  none (load cell empty)        06 00                    IDLE
+  CAL_APPLY         0x07  float32 LE known weight (kg)  07 04 00 00 A0 40 (5 kg) IDLE, or ERROR 0x03
+
+2-point calibration (saved to device flash, survives restart):
+  1. Load cell empty -> send CAL_CAPTURE_ZERO (06 00)
+  2. Place a known weight -> send CAL_APPLY with weight in kg
+  Normally NOT needed for measurement; the device is pre-calibrated.
+
+
+7. TYPICAL SESSION FLOW
+-----------------------
+  1. Scan, filtering by service UUID 4FAFC201-1FB5-459E-8FCC-C5C9C331914B
+  2. Connect (timeout ~10 s)
+  3. Request MTU 64
+  4. Discover services; locate the 4 characteristics
+  5. Enable notifications on Force Measurement AND Device Status
+  6. (optional) Read Device Info
+  7. Write TARE (01 00). Do not touch the load cell.
+     Wait for status TARING -> IDLE (~0.5 s; ERROR 0x02 if > 2 s)
+  8. Write START_STREAM (02 00). Force notifications begin.
+     Reset sequence tracking here.
+  9. Parse each notification into samples (section 3).
+ 10. Write STOP_STREAM (03 00) when done.
+ 11. Disconnect. Cancel notification subscriptions.
+
+Behaviour notes:
+- The device auto-stops streaming after 30 s with no BLE connection.
+- If the app goes to background, send STOP_STREAM first.
+- Original app's reconnect policy: 3 attempts with backoff 1 s -> 2 s -> 4 s.
+- A run interrupted by disconnect should be treated as incomplete.
+
+
+8. REFERENCE PARSER (Dart, no dependencies)
+-------------------------------------------
+import 'dart:typed_data';
+
+class HhdSample {
+  HhdSample(this.seq, this.timestampMs, this.forceKg, this.status);
+  final int seq, timestampMs, status;
+  final double forceKg;
+}
+
+List<HhdSample>? parseForce(List<int> bytes) {
+  if (bytes.isEmpty || bytes.length % 11 != 0) return null;
+  final bd = ByteData.sublistView(Uint8List.fromList(bytes));
+  return [
+    for (var o = 0; o < bytes.length; o += 11)
+      HhdSample(
+        bd.getUint16(o, Endian.little),
+        bd.getUint32(o + 2, Endian.little),
+        bd.getFloat32(o + 6, Endian.little),
+        bd.getUint8(o + 10),
+      ),
+  ];
+}
+
+List<int> buildCommand(int id, [List<int> payload = const []]) =>
+    [id, payload.length, ...payload];
+
+List<int> float32Le(double v) =>
+    (ByteData(4)..setFloat32(0, v, Endian.little)).buffer.asUint8List();
+
+
+9. REFERENCE PARSER (Python, struct module)
+-------------------------------------------
+import struct
+
+def parse_force(data: bytes):
+    if not data or len(data) % 11 != 0:
+        return None
+    return [
+        dict(zip(("seq", "timestamp_ms", "force_kg", "status"),
+                 struct.unpack_from("<HIfB", data, off)))
+        for off in range(0, len(data), 11)
+    ]
+
+def build_command(cmd_id: int, payload: bytes = b"") -> bytes:
+    return bytes([cmd_id, len(payload)]) + payload
+
+# e.g. CAL_APPLY 5 kg: build_command(0x07, struct.pack("<f", 5.0))
