@@ -23,6 +23,7 @@ import { useEffect, useRef, useState } from "react";
 import type { RepResult, SessionDraft } from "@/lib/storage/types";
 
 import { completeTest, removeLastRep, resetTest, saveRep } from "@/app/mrc/actions";
+import CameraView from "@/components/camera/camera-view";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import useCamera from "@/hooks/use-camera";
@@ -33,7 +34,6 @@ import { mrcSessionHref, mrcTestHref } from "@/lib/mrc/routes";
 import { buildMetrics, createMockSession, MrcSession } from "@/lib/mrc/session";
 import { roundRecordingRow, summarizeRep } from "@/lib/mrc/summary";
 
-import CameraView from "./camera-view";
 import PoseOverlay, { LEVEL_COLOR } from "./pose-overlay";
 import { AngleDashboardCard, FormStatusCard, RecommendationsCard, SessionCard } from "./session-cards";
 

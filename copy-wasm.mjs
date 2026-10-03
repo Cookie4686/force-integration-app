@@ -25,20 +25,28 @@ for (const srcDir of srcDirs) {
 console.log(`[copy-wasm] prepared ${copied} WASM asset(s) in ${destDir}.`);
 
 // ── Bundle workers with esbuild ───────────────────────────────────────────────
-const workerSrcDir = "src/lib/mediapipe/workers";
+// Every *.worker.ts in these folders is bundled to public/workers/<name>.js (flat).
+const workerSrcDirs = ["src/lib/mediapipe/workers", "src/lib/marker/workers"];
 const workerDestDir = "public/workers";
 
 if (!fs.existsSync(workerDestDir)) fs.mkdirSync(workerDestDir, { recursive: true });
 
-const workerFiles = fs.readdirSync(workerSrcDir).filter((f) => f.endsWith(".worker.ts"));
+const workerFiles = workerSrcDirs
+	.filter((dir) => fs.existsSync(dir))
+	.flatMap((dir) =>
+		fs
+			.readdirSync(dir)
+			.filter((f) => f.endsWith(".worker.ts"))
+			.map((f) => path.join(dir, f))
+	);
 
 if (workerFiles.length === 0) {
-	console.warn("[copy-wasm] no worker files found in", workerSrcDir);
+	console.warn("[copy-wasm] no worker files found in", workerSrcDirs.join(", "));
 } else {
-	const entryPoints = workerFiles.map((f) => path.join(workerSrcDir, f)).join(" ");
+	const entryPoints = workerFiles.join(" ");
 	try {
 		execSync(
-			`npx esbuild ${entryPoints} --bundle --format=esm --outdir=${workerDestDir} --platform=browser --external:path --external:fs --external:os --log-level=warning`,
+			`npx esbuild ${entryPoints} --bundle --format=esm --outdir=${workerDestDir} --entry-names=[name] --platform=browser --external:path --external:fs --external:os --log-level=warning`,
 			{ stdio: "inherit" }
 		);
 		console.log(`[copy-wasm] bundled ${workerFiles.length} worker(s) to ${workerDestDir}.`);

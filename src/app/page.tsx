@@ -7,6 +7,7 @@ import {
 	HistoryIcon,
 	type LucideIcon,
 	PersonStandingIcon,
+	ScanQrCodeIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -44,6 +45,12 @@ const MODULES: Module[] = [
 		description: "Connect the force reader and check the live force graph.",
 		path: "/tool/bluetooth",
 		icon: BluetoothIcon,
+	},
+	{
+		title: "Force Device Marker",
+		description: "Check the ArUco sticker on the force device is detected; print the marker.",
+		path: "/tool/marker",
+		icon: ScanQrCodeIcon,
 	},
 ];
 
