@@ -20,11 +20,12 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import useCamera from "@/hooks/use-camera";
 import usePoseStream, { PoseStreamStatus } from "@/hooks/use-pose-stream";
 import { MRC_SIDE_LABEL, MRC_TESTS, MrcTest } from "@/lib/mrc/joints";
+import { computeMeasure } from "@/lib/mrc/measure";
 import { mrcTestHref } from "@/lib/mrc/routes";
-import { createMockSession, MrcSession } from "@/lib/mrc/session";
+import { buildMetrics, createMockSession, MrcSession } from "@/lib/mrc/session";
 
 import CameraView from "./camera-view";
-import PoseOverlay from "./pose-overlay";
+import PoseOverlay, { LEVEL_COLOR } from "./pose-overlay";
 import { AngleDashboardCard, FormStatusCard, RecommendationsCard, SessionCard } from "./session-cards";
 
 const POSE_BADGE: Record<PoseStreamStatus | "tracking" | "no-person", { label: string; className: string }> = {
@@ -51,6 +52,17 @@ export default function JointTest({
 	const [session, setSession] = useState<MrcSession>(() => createMockSession(test));
 	const camera = useCamera();
 	const pose = usePoseStream(camera.videoRef);
+
+	// Live measure values from the (smoothed) pose, refreshed 10× per second for the dashboard.
+	const [liveValues, setLiveValues] = useState<(number | null)[]>([]);
+	useEffect(() => {
+		const timer = setInterval(() => {
+			const frame = pose.frameRef.current;
+			setLiveValues(test.measures.map((measure) => computeMeasure(measure, frame?.worldLandmarks, frame?.landmarks)));
+		}, 100);
+		return () => clearInterval(timer);
+	}, [pose.frameRef, test.measures]);
+	const liveMetrics = buildMetrics(test.measures, liveValues);
 	const poseBadge =
 		POSE_BADGE[
 			pose.status !== "ready" ? pose.status
@@ -167,9 +179,19 @@ export default function JointTest({
 						<div className="pointer-events-none absolute top-3 right-3 flex flex-col items-end gap-1.5">
 							<Badge className={poseBadge.className}>{poseBadge.label}</Badge>
 							{test.measures.length > 0 && (
-								<Badge className="bg-black/70 text-white">
-									<span className="size-2 rounded-full bg-amber-400" />
-									Joints used in this test
+								<Badge className="gap-2 bg-black/70 text-white">
+									{(
+										[
+											["good", "On target"],
+											["warning", "Adjust"],
+											["bad", "Off"],
+										] as const
+									).map(([level, label]) => (
+										<span className="flex items-center gap-1" key={level}>
+											<span className="size-2 rounded-full" style={{ backgroundColor: LEVEL_COLOR[level] }} />
+											{label}
+										</span>
+									))}
 								</Badge>
 							)}
 						</div>
@@ -274,7 +296,7 @@ export default function JointTest({
 						repetitions={joint.repetitions}
 						repDurationsMs={isManual ? repDurationsMs : undefined}
 					/>
-					<AngleDashboardCard metrics={session.metrics} />
+					<AngleDashboardCard metrics={liveMetrics} />
 					<FormStatusCard form={session.form} />
 					<RecommendationsCard recommendations={session.recommendations} />
 				</div>

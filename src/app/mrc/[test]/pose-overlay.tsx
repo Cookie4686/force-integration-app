@@ -4,46 +4,37 @@ import { useEffect, useRef } from "react";
 
 import { PoseFrame } from "@/hooks/use-pose-stream";
 import { MrcMeasure } from "@/lib/mrc/joints";
+import { computeMeasure, MIN_MEASURE_VISIBILITY } from "@/lib/mrc/measure";
+import { getMetricLevel, METRIC_UNIT, MrcStatusLevel } from "@/lib/mrc/session";
 import { POSE_CONNECTIONS } from "@/lib/pose/landmarks";
-
-const MIN_VISIBILITY = 0.5;
 
 const COLOR = {
 	bone: "rgba(255, 255, 255, 0.75)",
 	joint: "#ffffff",
-	highlight: "#fbbf24", // amber-400
+	reference: "#38bdf8", // sky-400: the other points of a measure
 	ring: "#ffffff",
-	hidden: "#ef4444", // red-500
 };
 
-// Landmarks and lines to emphasise, derived from the test's measures.
-const getHighlights = (measures: MrcMeasure[]) => {
-	const vertices = new Set<number>();
-	const points = new Set<number>();
-	const lines: { from: number; to: number; dashed: boolean }[] = [];
-	for (const measure of measures) {
-		if (measure.kind === "angle") {
-			vertices.add(measure.vertex);
-			measure.points.forEach((point) => {
-				points.add(point);
-				lines.push({ from: measure.vertex, to: point, dashed: false });
-			});
-		} else {
-			measure.points.forEach((point) => points.add(point));
-			lines.push({ from: measure.points[0], to: measure.points[1], dashed: true });
-		}
-	}
-	return { vertices, points, lines };
+// Same meaning as the Angle Dashboard: on target / adjust / off / not measured.
+export const LEVEL_COLOR: Record<MrcStatusLevel, string> = {
+	good: "#22c55e",
+	warning: "#f59e0b",
+	bad: "#ef4444",
+	unknown: "#9ca3af",
 };
 
-// Draws the tracked patient's skeleton over the camera, with the joints used by
-// this test highlighted. Must sit inside the same (mirrored) box as the <video>.
+// Draws the tracked patient's skeleton over the camera. The joints used by this
+// test are highlighted and coloured by their live status, with the value written
+// next to the measured joint. Must sit inside the same (mirrored) box as the <video>.
 export default function PoseOverlay({
 	frameRef,
 	measures,
+	mirrored = true,
 }: {
 	frameRef: React.RefObject<PoseFrame | null>;
 	measures: MrcMeasure[];
+	// Must match the camera's mirroring so the value labels can be flipped back to readable.
+	mirrored?: boolean;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -52,7 +43,8 @@ export default function PoseOverlay({
 		const ctx = canvas?.getContext("2d");
 		if (!canvas || !ctx) return;
 
-		const highlights = getHighlights(measures);
+		const vertices = new Set(measures.flatMap((m) => (m.kind === "angle" ? [m.vertex] : [])));
+		const references = new Set(measures.flatMap((m) => m.points).filter((i) => !vertices.has(i)));
 		let rafId = 0;
 		let drawnTime = -1;
 		let drawnSize = "";
@@ -86,7 +78,7 @@ export default function PoseOverlay({
 			const offsetY = (height - frame.height * scale) / 2;
 			const px = (i: number) => offsetX + landmarks[i].x * frame.width * scale;
 			const py = (i: number) => offsetY + landmarks[i].y * frame.height * scale;
-			const visible = (i: number) => (landmarks[i]?.visibility ?? 0) >= MIN_VISIBILITY;
+			const visible = (i: number) => (landmarks[i]?.visibility ?? 0) >= MIN_MEASURE_VISIBILITY;
 
 			const line = (from: number, to: number) => {
 				ctx.beginPath();
@@ -100,6 +92,15 @@ export default function PoseOverlay({
 				ctx.fillStyle = fill;
 				ctx.fill();
 			};
+			const ring = (i: number, radius: number, stroke: string, dashed = false) => {
+				ctx.lineWidth = dashed ? 2 : 3;
+				ctx.strokeStyle = stroke;
+				ctx.setLineDash(dashed ? [4, 4] : []);
+				ctx.beginPath();
+				ctx.arc(px(i), py(i), radius, 0, Math.PI * 2);
+				ctx.stroke();
+				ctx.setLineDash([]);
+			};
 
 			// 1. Whole skeleton.
 			ctx.lineCap = "round";
@@ -108,44 +109,64 @@ export default function PoseOverlay({
 			for (const [from, to] of POSE_CONNECTIONS) if (visible(from) && visible(to)) line(from, to);
 			for (let i = 0; i < landmarks.length; i++) if (visible(i)) dot(i, 3, COLOR.joint);
 
-			// 2. Measured segments.
+			// 2. Measured segments, coloured by each measure's live status.
+			const results = measures.map((measure) => {
+				const value = computeMeasure(measure, frame.worldLandmarks, landmarks);
+				return {
+					measure,
+					value,
+					level: getMetricLevel({ value, target: measure.target, tolerance: measure.tolerance }),
+				};
+			});
 			ctx.lineWidth = 5;
-			ctx.strokeStyle = COLOR.highlight;
-			for (const { from, to, dashed } of highlights.lines) {
-				if (!landmarks[from] || !landmarks[to]) continue;
-				ctx.setLineDash(dashed ? [10, 8] : []);
-				line(from, to);
-			}
-			ctx.setLineDash([]);
-
-			// 3. Measured joints: vertex larger with a white ring. A red dashed ring = not visible.
-			for (const i of new Set([...highlights.points, ...highlights.vertices])) {
-				if (!landmarks[i]) continue;
-				const isVertex = highlights.vertices.has(i);
-				const radius = isVertex ? 9 : 6;
-				dot(i, radius, COLOR.highlight);
-				if (isVertex) {
-					ctx.lineWidth = 3;
-					ctx.strokeStyle = COLOR.ring;
-					ctx.beginPath();
-					ctx.arc(px(i), py(i), radius + 2, 0, Math.PI * 2);
-					ctx.stroke();
-				}
-				if (!visible(i)) {
-					ctx.lineWidth = 2;
-					ctx.strokeStyle = COLOR.hidden;
-					ctx.setLineDash([4, 4]);
-					ctx.beginPath();
-					ctx.arc(px(i), py(i), radius + 6, 0, Math.PI * 2);
-					ctx.stroke();
+			for (const { measure, level } of results) {
+				ctx.strokeStyle = LEVEL_COLOR[level];
+				if (measure.kind === "angle") {
+					line(measure.vertex, measure.points[0]);
+					line(measure.vertex, measure.points[1]);
+				} else {
+					ctx.setLineDash([10, 8]);
+					line(measure.points[0], measure.points[1]);
 					ctx.setLineDash([]);
 				}
+			}
+
+			// 3. Reference points.
+			for (const i of references) {
+				dot(i, 6, COLOR.reference);
+				if (!visible(i)) ring(i, 11, LEVEL_COLOR.unknown, true);
+			}
+
+			// 4. Measured joints (angle vertex): larger dot + white ring + value label.
+			ctx.font = "bold 16px sans-serif";
+			ctx.textBaseline = "middle";
+			for (const { measure, value, level } of results) {
+				if (measure.kind !== "angle") continue;
+				const i = measure.vertex;
+				dot(i, 9, LEVEL_COLOR[level]);
+				ring(i, 11, COLOR.ring);
+				if (!visible(i)) ring(i, 16, LEVEL_COLOR.unknown, true);
+
+				const text = value === null ? "—" : `${Math.round(value)}${METRIC_UNIT.angle}`;
+				// Flip the text back so it reads normally on the mirrored canvas.
+				ctx.save();
+				ctx.translate(px(i), py(i));
+				if (mirrored) ctx.scale(-1, 1);
+				const textX = 18;
+				const textWidth = ctx.measureText(text).width;
+				ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+				ctx.beginPath();
+				ctx.roundRect(textX - 6, -13, textWidth + 12, 26, 6);
+				ctx.fill();
+				ctx.fillStyle = LEVEL_COLOR[level];
+				ctx.fillText(text, textX, 0);
+				ctx.restore();
 			}
 		};
 
 		rafId = requestAnimationFrame(draw);
 		return () => cancelAnimationFrame(rafId);
-	}, [frameRef, measures]);
+	}, [frameRef, measures, mirrored]);
 
 	return <canvas className="pointer-events-none absolute inset-0 h-full w-full" ref={canvasRef} />;
 }

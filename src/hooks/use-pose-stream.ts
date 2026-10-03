@@ -9,9 +9,24 @@ import { useEffect, useRef, useState } from "react";
 import type { PoseLandmarkerWorker } from "@/lib/mediapipe/workers/pose.worker";
 
 import { POSE } from "@/lib/pose/landmarks";
+import { DEFAULT_PROCESSING_SETTINGS, PoseProcessingSettings, PoseProcessor } from "@/lib/pose/processing";
 
 // Bundled from src/lib/mediapipe/workers/pose.worker.ts by copy-wasm.mjs.
 const WORKER_FILE_PATH = "/workers/pose.worker.js";
+
+// Smoothing for the test screen, using the same filters as /tool/pose.
+// Tune the values live on /tool/pose (Video tab → Signal Processing), then copy them here.
+const SMOOTHING: PoseProcessingSettings = {
+	...DEFAULT_PROCESSING_SETTINGS,
+	// Ignore unreliable points instead of letting them pull the filter.
+	confidenceThreshold: { enabled: true, value: 0.5 },
+	// Strong smoothing when still (the patient holds a position), less lag when moving fast.
+	oneEuro: { enabled: true, minCutoff: 1.0, beta: 5, dCutoff: 1.0 },
+};
+
+// If the tracked shoulder midpoint jumps further than this (fraction of the frame)
+// between detections, a different person was picked: restart the filters.
+const PERSON_SWITCH_DISTANCE = 0.15;
 
 const MODEL_OPTIONS = (delegate: "GPU" | "CPU"): PoseLandmarkerOptions => ({
 	baseOptions: { modelAssetPath: "/pose/model/pose_landmarker_lite.task", delegate },
@@ -65,6 +80,10 @@ export default function usePoseStream(videoRef: React.RefObject<HTMLVideoElement
 		let ready = false;
 		let rafId = 0;
 		let lastVideoTime = -1;
+		// Separate smoothing tracks for the 2D (drawing) and 3D world (angles) landmarks.
+		const imageSmoother = new PoseProcessor();
+		const worldSmoother = new PoseProcessor();
+		let lastShoulderMid: { x: number; y: number } | null = null;
 
 		// GPU first; fall back to CPU if the GPU delegate cannot start.
 		api
@@ -90,19 +109,44 @@ export default function usePoseStream(videoRef: React.RefObject<HTMLVideoElement
 			) {
 				lastVideoTime = video.currentTime;
 				try {
+					const now = performance.now();
 					const bitmap = await createImageBitmap(video);
-					const response = await api.detectForVideo(Comlink.transfer(bitmap, [bitmap]), performance.now());
+					const response = await api.detectForVideo(Comlink.transfer(bitmap, [bitmap]), now);
 					if (cancelled) return;
 					if (response !== null) {
 						const patient = pickPatient(response.result.landmarks);
+						const raw = response.result.landmarks[patient];
+						const rawWorld = response.result.worldLandmarks[patient];
+
+						let landmarks: NormalizedLandmark[] | null = null;
+						let worldLandmarks: Landmark[] | null = null;
+						if (raw) {
+							// A big jump means a different person was picked — don't blend two bodies.
+							const mid = {
+								x: (raw[POSE.leftShoulder].x + raw[POSE.rightShoulder].x) / 2,
+								y: (raw[POSE.leftShoulder].y + raw[POSE.rightShoulder].y) / 2,
+							};
+							if (
+								lastShoulderMid
+								&& Math.hypot(mid.x - lastShoulderMid.x, mid.y - lastShoulderMid.y) > PERSON_SWITCH_DISTANCE
+							) {
+								imageSmoother.resetFocused();
+								worldSmoother.resetFocused();
+							}
+							lastShoulderMid = mid;
+
+							landmarks = imageSmoother.processSingle(raw, SMOOTHING, now / 1000);
+							worldLandmarks = rawWorld ? worldSmoother.processSingle(rawWorld, SMOOTHING, now / 1000) : null;
+						}
+
 						frameRef.current = {
-							landmarks: response.result.landmarks[patient] ?? null,
-							worldLandmarks: response.result.worldLandmarks[patient] ?? null,
+							landmarks,
+							worldLandmarks,
 							width: video.videoWidth,
 							height: video.videoHeight,
-							time: performance.now(),
+							time: now,
 						};
-						setHasPerson(patient >= 0);
+						setHasPerson(raw !== undefined);
 					}
 				} catch {
 					// transient frame / detection failure — keep the loop alive
