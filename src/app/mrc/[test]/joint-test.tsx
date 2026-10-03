@@ -6,29 +6,42 @@ import {
 	ChevronLeft,
 	ChevronRight,
 	CircleCheckIcon,
+	FileTextIcon,
 	HandIcon,
+	Loader2Icon,
 	PauseIcon,
 	PlayIcon,
 	RotateCcwIcon,
 	RotateCwIcon,
+	TriangleAlertIcon,
 	Undo2Icon,
 	VideoIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
+import type { RepResult, SessionDraft } from "@/lib/storage/types";
+
+import { completeTest, removeLastRep, resetTest, saveRep } from "@/app/mrc/actions";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import useCamera from "@/hooks/use-camera";
 import usePoseStream, { PoseStreamStatus } from "@/hooks/use-pose-stream";
 import { MRC_SIDE_LABEL, MRC_TESTS, MrcTest } from "@/lib/mrc/joints";
 import { computeMeasure, FACING_RATIO_THRESHOLD, getShoulderWidthRatio } from "@/lib/mrc/measure";
-import { mrcTestHref } from "@/lib/mrc/routes";
+import { mrcSessionHref, mrcTestHref } from "@/lib/mrc/routes";
 import { buildMetrics, createMockSession, MrcSession } from "@/lib/mrc/session";
+import { roundRecordingRow, summarizeRep } from "@/lib/mrc/summary";
 
 import CameraView from "./camera-view";
 import PoseOverlay, { LEVEL_COLOR } from "./pose-overlay";
 import { AngleDashboardCard, FormStatusCard, RecommendationsCard, SessionCard } from "./session-cards";
+
+// Live values refresh (and are recorded during a repetition) at this interval.
+const SAMPLE_INTERVAL_MS = 100;
+
+type SaveState = "idle" | "saving" | "saved" | "error";
+type SaveTask = (session: SessionDraft) => Promise<unknown>;
 
 const POSE_BADGE: Record<PoseStreamStatus | "tracking" | "no-person", { label: string; className: string }> = {
 	loading: { label: "Loading pose model…", className: "bg-black/70 text-white" },
@@ -43,11 +56,14 @@ export default function JointTest({
 	isSequence,
 	isManual,
 	nextTest,
+	session: sessionDraft,
 }: {
 	test: MrcTest;
 	isSequence: boolean;
 	isManual: boolean;
 	nextTest?: MrcTest;
+	// Where to save results (from the start popup). Without it, nothing is saved.
+	session?: SessionDraft;
 }) {
 	const { joint } = test;
 	// TODO: replace the mock with live data from the pose model.
@@ -59,12 +75,17 @@ export default function JointTest({
 	const [liveValues, setLiveValues] = useState<(number | null)[]>([]);
 	// Shoulder width ÷ trunk length: small = side-on, large = facing the camera.
 	const [viewRatio, setViewRatio] = useState<number | null>(null);
+	// Values recorded during the current repetition: [sample][measure].
+	const recordingRef = useRef<(number | null)[][]>([]);
+	const isRecordingRef = useRef(false);
 	useEffect(() => {
 		const timer = setInterval(() => {
 			const frame = pose.frameRef.current;
-			setLiveValues(test.measures.map((measure) => computeMeasure(measure, frame)));
+			const values = test.measures.map((measure) => computeMeasure(measure, frame));
+			setLiveValues(values);
 			setViewRatio(getShoulderWidthRatio(frame));
-		}, 100);
+			if (isRecordingRef.current) recordingRef.current.push(roundRecordingRow(values));
+		}, SAMPLE_INTERVAL_MS);
 		return () => clearInterval(timer);
 	}, [pose.frameRef, test.measures]);
 	const liveMetrics = buildMetrics(test.measures, liveValues);
@@ -108,22 +129,83 @@ export default function JointTest({
 		return () => clearInterval(timer);
 	}, [repStartedAt]);
 
+	const repStartedIsoRef = useRef("");
+
+	// --- Saving (app/mrc/actions.ts): manual mode with a session from the /mrc page.
+	const sessionId = sessionDraft?.id;
+	const canSave = isManual && sessionDraft !== undefined;
+	// The first rep saved from this page replaces any older reps of this test in the file.
+	const restartRef = useRef(true);
+	const [saveState, setSaveState] = useState<SaveState>("idle");
+	// Saves run one after another, in the order they were made.
+	const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
+	const failedSaveRef = useRef<SaveTask | null>(null);
+
+	const runSave = (draft: SessionDraft, task: SaveTask) => {
+		saveChainRef.current = saveChainRef.current
+			.then(() => task(draft))
+			.then(
+				() => {
+					failedSaveRef.current = null;
+					setSaveState("saved");
+				},
+				() => {
+					failedSaveRef.current = task;
+					setSaveState("error");
+				}
+			);
+	};
+	const persist = (task: SaveTask) => {
+		if (!isManual || sessionDraft === undefined) return;
+		setSaveState("saving");
+		runSave(sessionDraft, task);
+	};
+	const retrySave = () => {
+		if (failedSaveRef.current) persist(failedSaveRef.current);
+	};
+
 	const toggleRep = () => {
 		if (isFinished) return;
 		const time = performance.now();
 		if (repStartedAt === null) {
+			recordingRef.current = [];
+			isRecordingRef.current = true;
+			repStartedIsoRef.current = new Date().toISOString();
 			setRepStartedAt(time);
 			setNow(time);
 		} else {
-			setRepDurationsMs((prev) => [...prev, time - repStartedAt]);
+			isRecordingRef.current = false;
+			const durationMs = time - repStartedAt;
+			const values = recordingRef.current;
+			setRepDurationsMs((prev) => [...prev, durationMs]);
 			setRepStartedAt(null);
+
+			const rep: RepResult = {
+				index: repsDone + 1,
+				startedAt: repStartedIsoRef.current,
+				durationMs: Math.round(durationMs),
+				metrics: summarizeRep(test.measures, values),
+				recording: { intervalMs: SAMPLE_INTERVAL_MS, values },
+			};
+			const restart = restartRef.current;
+			restartRef.current = false;
+			persist((draft) => saveRep(draft, test.id, rep, restart));
+			if (repsDone + 1 >= joint.repetitions) persist((draft) => completeTest(draft.id, test.id));
 		}
+	};
+
+	const undoRep = () => {
+		setRepDurationsMs((prev) => prev.slice(0, -1));
+		persist((draft) => removeLastRep(draft.id, test.id));
 	};
 
 	const reset = () => {
 		setSession(createMockSession(test));
 		setRepDurationsMs([]);
 		setRepStartedAt(null);
+		isRecordingRef.current = false;
+		recordingRef.current = [];
+		persist((draft) => resetTest(draft.id, test.id));
 	};
 
 	// In manual mode, repetitions / timeline / status come from the doctor's taps.
@@ -191,8 +273,45 @@ export default function JointTest({
 							Without force
 						</Badge>
 					)}
+					{canSave
+						&& (saveState === "error" ?
+							<Button size="sm" variant="destructive" onClick={retrySave}>
+								<TriangleAlertIcon />
+								Save failed — retry
+							</Button>
+						:	<Badge variant="outline">
+								{saveState === "saving" ?
+									<Loader2Icon className="animate-spin" />
+								: saveState === "saved" ?
+									<CheckIcon />
+								:	null}
+								{saveState === "saving" ?
+									"Saving…"
+								: saveState === "saved" ?
+									"Saved"
+								:	"Saved after the first repetition"}
+							</Badge>)}
 				</div>
 			</div>
+
+			{isManual && sessionId === undefined && (
+				<div className="flex items-center gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-2 text-sm">
+					<TriangleAlertIcon className="size-4 shrink-0 text-amber-600" />
+					<span>
+						Not saving — choose a patient on the{" "}
+						<Link className="font-medium underline" href="/mrc">
+							MRC page
+						</Link>{" "}
+						and start the test from there.
+					</span>
+				</div>
+			)}
+			{!isManual && sessionId !== undefined && (
+				<div className="text-muted-foreground flex items-center gap-2 rounded-lg border px-4 py-2 text-sm">
+					<TriangleAlertIcon className="size-4 shrink-0" />
+					Results are not saved in force-device mode yet.
+				</div>
+			)}
 
 			<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
 				{/* Left: camera + controls */}
@@ -275,12 +394,7 @@ export default function JointTest({
 
 					<div className="flex flex-wrap items-center gap-2">
 						{isManual ?
-							<Button
-								size="lg"
-								variant="outline"
-								disabled={repsDone === 0 || isRepActive}
-								onClick={() => setRepDurationsMs((prev) => prev.slice(0, -1))}
-							>
+							<Button size="lg" variant="outline" disabled={repsDone === 0 || isRepActive} onClick={undoRep}>
 								<Undo2Icon />
 								Undo last repetition
 							</Button>
@@ -299,6 +413,13 @@ export default function JointTest({
 							Reset
 						</Button>
 
+						{canSave && sessionId !== undefined && isFinished && !isSequence && (
+							<Link className={buttonVariants({ size: "lg", className: "ml-auto" })} href={mrcSessionHref(sessionId)}>
+								<FileTextIcon />
+								View results
+							</Link>
+						)}
+
 						{/* TODO: move on automatically once the session is finished. */}
 						{isSequence && (
 							<Link
@@ -307,7 +428,12 @@ export default function JointTest({
 									variant: isManual && isFinished ? "default" : "outline",
 									className: "ml-auto",
 								})}
-								href={nextTest ? mrcTestHref(nextTest.id, { sequence: true, manual: isManual }) : "/mrc"}
+								href={
+									nextTest ? mrcTestHref(nextTest.id, { sequence: true, manual: isManual, session: sessionDraft })
+									: sessionId ?
+										mrcSessionHref(sessionId)
+									:	"/mrc"
+								}
 							>
 								{nextTest ?
 									<>

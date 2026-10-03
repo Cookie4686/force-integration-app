@@ -2,14 +2,14 @@
 
 import { cn } from "cn";
 import { ChevronRight, HandIcon, ListOrderedIcon, PlayIcon, WeightIcon } from "lucide-react";
-import Link from "next/link";
 import { Fragment, useState } from "react";
 
-import { buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { MRC_JOINTS, MRC_SIDE_LABEL, MRC_TESTS } from "@/lib/mrc/joints";
-import { mrcTestHref } from "@/lib/mrc/routes";
+
+import StartTestDialog, { StartRequest } from "./start-test-dialog";
 
 // TODO: แก้ให้เป็นของจริงด้วย
 const PREPARATION_STEPS = [
@@ -39,6 +39,8 @@ const TEST_MODES = [
 export default function PageMRC() {
 	// No force device available yet, so manual mode is the default.
 	const [manual, setManual] = useState(true);
+	// The test the user clicked "Start" on; opens the popup asking for test name + patient.
+	const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
 
 	return (
 		<div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-8 py-12">
@@ -47,6 +49,8 @@ export default function PageMRC() {
 				<h2 className="mb-2 text-3xl font-bold">6 Exercise Test</h2>
 				<p className="text-muted-foreground text-sm">Run the full test, or pick a single joint</p>
 			</div>
+
+			{startRequest && <StartTestDialog request={startRequest} manual={manual} onClose={() => setStartRequest(null)} />}
 
 			{/* Preparation checklist */}
 			<Card>
@@ -133,13 +137,14 @@ export default function PageMRC() {
 								))}
 							</div>
 						</div>
-						<Link
-							className={buttonVariants({ size: "lg", className: "h-11 px-6 text-base" })}
-							href={mrcTestHref(MRC_TESTS[0].id, { sequence: true, manual })}
+						<Button
+							className="h-11 px-6 text-base"
+							size="lg"
+							onClick={() => setStartRequest({ testId: MRC_TESTS[0].id, sequence: true, title: "Full test" })}
 						>
 							<PlayIcon />
 							<span>Start all tests</span>
-						</Link>
+						</Button>
 					</CardContent>
 				</Card>
 			</section>
@@ -163,19 +168,27 @@ export default function PageMRC() {
 								<p className="text-muted-foreground text-sm">{joint.description}</p>
 							</CardContent>
 							<CardFooter className="gap-2">
-								{joint.sides.map((side) => (
-									<Link
-										className={cn(
-											buttonVariants({ variant: "outline", size: "lg" }),
-											"flex-1 border-blue-500 dark:border-blue-400"
-										)}
-										href={mrcTestHref(`${joint.id}-${side}`, { sequence: false, manual })}
-										key={side}
-									>
-										<span>{MRC_SIDE_LABEL[side]}</span>
-										<ChevronRight size={16} />
-									</Link>
-								))}
+								{joint.sides.map((side) => {
+									const testId = `${joint.id}-${side}`;
+									return (
+										<Button
+											className="flex-1 border-blue-500 dark:border-blue-400"
+											size="lg"
+											variant="outline"
+											key={side}
+											onClick={() =>
+												setStartRequest({
+													testId,
+													sequence: false,
+													title: `${MRC_SIDE_LABEL[side]} ${joint.name}`,
+												})
+											}
+										>
+											<span>{MRC_SIDE_LABEL[side]}</span>
+											<ChevronRight size={16} />
+										</Button>
+									);
+								})}
 							</CardFooter>
 						</Card>
 					))}
