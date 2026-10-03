@@ -57,6 +57,7 @@ export default function JointTest({
 	isManual,
 	nextTest,
 	session: sessionDraft,
+	savedRepDurationsMs = [],
 }: {
 	test: MrcTest;
 	isSequence: boolean;
@@ -64,6 +65,8 @@ export default function JointTest({
 	nextTest?: MrcTest;
 	// Where to save results (from the start popup). Without it, nothing is saved.
 	session?: SessionDraft;
+	// Reps of this test already saved in the session (continuing a record); counting resumes after them.
+	savedRepDurationsMs?: number[];
 }) {
 	const { joint } = test;
 	// TODO: replace the mock with live data from the pose model.
@@ -115,7 +118,7 @@ export default function JointTest({
 	const index = MRC_TESTS.findIndex(({ id }) => id === test.id);
 
 	// --- Manual mode (no force device): the doctor taps the screen to start/stop each repetition.
-	const [repDurationsMs, setRepDurationsMs] = useState<number[]>([]);
+	const [repDurationsMs, setRepDurationsMs] = useState<number[]>(savedRepDurationsMs);
 	const [repStartedAt, setRepStartedAt] = useState<number | null>(null);
 	const [now, setNow] = useState(0);
 	const repsDone = repDurationsMs.length;
@@ -134,9 +137,7 @@ export default function JointTest({
 	// --- Saving (app/mrc/actions.ts): manual mode with a session from the /mrc page.
 	const sessionId = sessionDraft?.id;
 	const canSave = isManual && sessionDraft !== undefined;
-	// The first rep saved from this page replaces any older reps of this test in the file.
-	const restartRef = useRef(true);
-	const [saveState, setSaveState] = useState<SaveState>("idle");
+	const [saveState, setSaveState] = useState<SaveState>(savedRepDurationsMs.length > 0 ? "saved" : "idle");
 	// Saves run one after another, in the order they were made.
 	const saveChainRef = useRef<Promise<unknown>>(Promise.resolve());
 	const failedSaveRef = useRef<SaveTask | null>(null);
@@ -187,9 +188,7 @@ export default function JointTest({
 				metrics: summarizeRep(test.measures, values),
 				recording: { intervalMs: SAMPLE_INTERVAL_MS, values },
 			};
-			const restart = restartRef.current;
-			restartRef.current = false;
-			persist((draft) => saveRep(draft, test.id, rep, restart));
+			persist((draft) => saveRep(draft, test.id, rep));
 			if (repsDone + 1 >= joint.repetitions) persist((draft) => completeTest(draft.id, test.id));
 		}
 	};

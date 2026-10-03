@@ -1,7 +1,7 @@
 "use client";
 
 import { cn } from "cn";
-import { ActivityIcon, BluetoothIcon, ChevronDownIcon, HomeIcon, PersonStandingIcon } from "lucide-react";
+import { ActivityIcon, BluetoothIcon, ChevronDownIcon, HistoryIcon, HomeIcon, PersonStandingIcon } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Fragment, useContext, useEffect, useMemo, useState } from "react";
@@ -30,7 +30,10 @@ import { getClientSideCookie } from "@/lib/utils/cookie";
 const navItems: NavItems = [
 	{
 		groupLabel: "Dashboard",
-		items: [{ title: "Home", url: "/", icon: HomeIcon }],
+		items: [
+			{ title: "Home", url: "/", icon: HomeIcon },
+			{ title: "History", url: "/history", icon: HistoryIcon },
+		],
 	},
 	{
 		groupLabel: "Test",

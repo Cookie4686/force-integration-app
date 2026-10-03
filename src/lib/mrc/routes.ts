@@ -1,4 +1,6 @@
-import type { SessionDraft } from "@/lib/storage/types";
+import type { Session, SessionDraft } from "@/lib/storage/types";
+
+import { MRC_TESTS } from "./joints";
 
 // URL for one MRC test. Query params:
 //   ?mode=sequence → part of the full test (moves on to the next test)
@@ -28,6 +30,26 @@ export const readSessionDraft = (
 	const { session, patient, name } = query;
 	if (typeof session !== "string" || typeof patient !== "string" || typeof name !== "string") return undefined;
 	return { id: session, patientId: patient, name, mode: manual ? "manual" : "force", sequence };
+};
+
+// "Continue" link for an unfinished record: the first test not completed yet
+// (full test: in test order; single test: that test). Null when nothing is left.
+export const mrcContinueHref = (session: Session): string | null => {
+	const completed = new Set(session.tests.filter((test) => test.status === "completed").map((test) => test.testId));
+	const candidates = session.sequence ? MRC_TESTS.map(({ id }) => id) : session.tests.map((test) => test.testId);
+	const testId = candidates.find((id) => !completed.has(id));
+	if (!testId) return null;
+	return mrcTestHref(testId, {
+		sequence: session.sequence,
+		manual: session.mode === "manual",
+		session: {
+			id: session.id,
+			patientId: session.patientId,
+			name: session.name || "Untitled test",
+			mode: session.mode,
+			sequence: session.sequence,
+		},
+	});
 };
 
 // Results page of a session.

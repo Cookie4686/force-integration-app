@@ -6,7 +6,7 @@
 
 import "server-only";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import type { Patient, Session } from "./types";
@@ -81,6 +81,20 @@ export const addPatient = (patient: Patient): Promise<void> =>
 // --- Sessions --------------------------------------------------------------------
 
 export const readSession = (id: string): Promise<Session | null> => readJson<Session | null>(sessionFile(id), null);
+
+// Every saved session. Skips temp files and any file that cannot be read as JSON.
+export const listSessions = async (): Promise<Session[]> => {
+	let names: string[];
+	try {
+		names = await readdir(SESSIONS_DIR);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
+		throw error;
+	}
+	const ids = names.filter((name) => name.endsWith(".json")).map((name) => name.slice(0, -".json".length));
+	const sessions = await Promise.all(ids.filter(isValidId).map((id) => readSession(id).catch(() => null)));
+	return sessions.filter((session): session is Session => session !== null);
+};
 
 const countReps = (session: Session): number => session.tests.reduce((sum, test) => sum + test.reps.length, 0);
 

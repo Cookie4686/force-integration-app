@@ -124,10 +124,9 @@ const newTestResult = (testId: string): TestResult => {
 	};
 };
 
-// Saves one repetition. The first one creates the session file.
-// `restart`: first rep since the test page was opened — replaces any earlier
-// reps of this test, so the file matches what the screen shows.
-export async function saveRep(draft: SessionDraft, testId: string, rep: RepResult, restart: boolean): Promise<void> {
+// Saves one repetition. The first one creates the session file; later ones are
+// added after the test's earlier reps (the test page loads those when reopened).
+export async function saveRep(draft: SessionDraft, testId: string, rep: RepResult): Promise<void> {
 	const name = cleanSessionName(draft?.name);
 	await assertPatientExists(draft?.patientId);
 	const fresh = newTestResult(testId); // also rejects an unknown test
@@ -146,8 +145,7 @@ export async function saveRep(draft: SessionDraft, testId: string, rep: RepResul
 		}),
 		(session) => {
 			let test = session.tests.find((item) => item.testId === testId);
-			if (!test || restart) {
-				session.tests = session.tests.filter((item) => item.testId !== testId);
+			if (!test) {
 				test = fresh;
 				session.tests.push(test);
 			}
