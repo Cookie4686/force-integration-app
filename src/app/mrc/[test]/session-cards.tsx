@@ -41,7 +41,7 @@ const SESSION_STATUS_LABEL: Record<MrcSessionStatus, string> = {
 };
 
 const formatMetric = (kind: MrcMetric["kind"], value: number) =>
-	(kind === "angle" ? Math.round(value).toString() : value.toFixed(1)) + METRIC_UNIT[kind];
+	(kind === "alignment" ? value.toFixed(1) : Math.round(value).toString()) + METRIC_UNIT[kind];
 
 // --- Session -----------------------------------------------------------------
 

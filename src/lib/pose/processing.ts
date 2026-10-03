@@ -42,15 +42,6 @@ export const DEFAULT_PROCESSING_SETTINGS: PoseProcessingSettings = {
 	normalized: true,
 };
 
-// MediaPipe Pose landmark indices used to build the canonical body frame.
-const LM = {
-	nose: 0,
-	leftShoulder: 11,
-	rightShoulder: 12,
-	leftHip: 23,
-	rightHip: 24,
-} as const;
-
 export type Vec3 = { x: number; y: number; z: number };
 
 // --- One Euro filter (per scalar) ------------------------------------------

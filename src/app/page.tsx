@@ -1,6 +1,13 @@
 "use client";
 
-import { ActivityIcon, ChevronRight, type LucideIcon, PersonStandingIcon } from "lucide-react";
+import {
+	ActivityIcon,
+	BluetoothIcon,
+	ChevronRight,
+	HistoryIcon,
+	type LucideIcon,
+	PersonStandingIcon,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
@@ -21,10 +28,22 @@ const MODULES: Module[] = [
 		icon: ActivityIcon,
 	},
 	{
+		title: "History",
+		description: "Saved test records, by date. View details and export results.",
+		path: "/history",
+		icon: HistoryIcon,
+	},
+	{
 		title: "Pose Detection Tool",
 		description: "Tools for testing pose detection model.",
 		path: "/tool/pose",
 		icon: PersonStandingIcon,
+	},
+	{
+		title: "Bluetooth Force Device",
+		description: "Connect the force reader and check the live force graph.",
+		path: "/tool/bluetooth",
+		icon: BluetoothIcon,
 	},
 ];
 

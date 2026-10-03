@@ -5,7 +5,7 @@
 // producing one every frame. Static per-joint configuration (which landmarks,
 // target angles, …) lives in joints.ts; this file holds what changes at runtime.
 
-import { getMeasureLabel, MrcTest } from "./joints";
+import { getMeasureLabel, MrcMeasure, MrcTest } from "./joints";
 
 export type MrcSessionStatus = "ready" | "running" | "paused" | "finished";
 
@@ -16,7 +16,7 @@ export type MrcStatusLevel = "good" | "warning" | "bad" | "unknown";
 // measure it this frame (e.g. landmark not visible).
 export type MrcMetric = {
 	id: string;
-	kind: "angle" | "alignment";
+	kind: MrcMeasure["kind"];
 	label: string;
 	value: number | null;
 	target: number;
@@ -36,10 +36,14 @@ export type MrcSession = {
 	recommendations: string[];
 };
 
-export const METRIC_UNIT: Record<MrcMetric["kind"], string> = { angle: "°", alignment: " cm" };
+export const METRIC_UNIT: Record<MrcMetric["kind"], string> = { angle: "°", inclination: "°", alignment: " cm" };
 
 // good: within tolerance · warning: within 2× tolerance · bad: beyond that.
-export const getMetricLevel = ({ value, target, tolerance }: MrcMetric): MrcStatusLevel => {
+export const getMetricLevel = ({
+	value,
+	target,
+	tolerance,
+}: Pick<MrcMetric, "value" | "target" | "tolerance">): MrcStatusLevel => {
 	if (value === null) return "unknown";
 	const offset = Math.abs(value - target);
 	return (
@@ -49,8 +53,16 @@ export const getMetricLevel = ({ value, target, tolerance }: MrcMetric): MrcStat
 	);
 };
 
-// MOCK: fake readings (in tolerance units below target) so each status colour shows up.
-const MOCK_DEVIATIONS = [-0.6, -1.4, -2.5];
+// Dashboard rows for a test's measures, given their live values (same order; null = not measured).
+export const buildMetrics = (measures: MrcMeasure[], values: (number | null)[]): MrcMetric[] =>
+	measures.map((measure, idx) => ({
+		id: String(idx),
+		kind: measure.kind,
+		label: getMeasureLabel(measure),
+		value: values[idx] ?? null,
+		target: measure.target,
+		tolerance: measure.tolerance,
+	}));
 
 // MOCK: placeholder values so the layout can be reviewed before the model is
 // connected. Replace with real data from the model integration.
@@ -58,14 +70,8 @@ export const createMockSession = ({ joint, measures }: MrcTest): MrcSession => (
 	status: "ready",
 	repetitionsDone: 2,
 	progress: 0.4,
-	metrics: measures.map((measure, idx) => ({
-		id: String(idx),
-		kind: measure.kind,
-		label: getMeasureLabel(measure),
-		value: measure.target + measure.tolerance * MOCK_DEVIATIONS[idx % MOCK_DEVIATIONS.length],
-		target: measure.target,
-		tolerance: measure.tolerance,
-	})),
+	// Live values come from the pose model (see lib/mrc/measure.ts).
+	metrics: buildMetrics(measures, []),
 	form: {
 		level: "warning",
 		message: "Minor adjustment needed",

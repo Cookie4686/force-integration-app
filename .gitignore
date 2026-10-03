@@ -43,3 +43,6 @@ next-env.d.ts
 # Pre-build wasm and worker files
 /public/wasm
 /public/workers
+
+# Local test results and patient records (never commit)
+/data
