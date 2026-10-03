@@ -22,6 +22,11 @@ export type MrcAngleMeasure = {
 	target: number;
 	// Allowed deviation from target (±) that still counts as correct posture.
 	tolerance: number;
+	// "image" (default): angle as seen in the camera picture — matches what the doctor
+	//   sees; place the camera facing the plane of movement.
+	// "world": 3D angle using MediaPipe's depth estimate — independent of camera
+	//   angle, but depth (z) is noisy and can bend a straight limb by 30°+.
+	space?: "image" | "world";
 };
 
 // Distance between two landmarks, in centimetres.
@@ -32,7 +37,18 @@ export type MrcAlignmentMeasure = {
 	tolerance: number;
 };
 
-export type MrcMeasure = MrcAngleMeasure | MrcAlignmentMeasure;
+// Tilt of the line points[0]→points[1] against straight down (gravity), in the
+// camera picture. Degrees: 0 = hanging down, 90 = horizontal, 180 = straight up.
+// Needs only two landmarks — no unstable reference point like the hip — but the
+// camera must be level (not tilted).
+export type MrcInclinationMeasure = {
+	kind: "inclination";
+	points: [PoseLandmarkIndex, PoseLandmarkIndex];
+	target: number;
+	tolerance: number;
+};
+
+export type MrcMeasure = MrcAngleMeasure | MrcAlignmentMeasure | MrcInclinationMeasure;
 
 export type MrcJoint = {
 	id: MrcJointId;
@@ -42,6 +58,11 @@ export type MrcJoint = {
 	repetitions: number;
 	// Sides to test, in order. `measures` are always written for the right side.
 	sides: MrcSide[];
+	// Where the camera must be (depends on the pose — to be confirmed with the doctor).
+	// "front": the patient faces the camera.
+	// "side": the TESTED side faces the camera (patient side-on); use only same-side
+	//   landmarks, never cross-body pairs like 11↔12 — they overlap in a side view.
+	camera: "side" | "front";
 	// What the pose model checks during the test (right side). May mix angles and alignments, or be empty.
 	measures: MrcMeasure[];
 };
@@ -54,21 +75,23 @@ export const MRC_JOINTS: MrcJoint[] = [
 		description: "Shoulder extension.",
 		repetitions: 5,
 		sides: ["right", "left"],
+		camera: "front",
 		measures: [
-			// Angle of right shoulder (12), between right elbow (14) and left shoulder (11).
-			{
-				kind: "angle",
-				vertex: POSE.rightShoulder,
-				points: [POSE.rightElbow, POSE.leftShoulder],
-				target: 180,
-				tolerance: 5,
-			},
-			// Angle of right elbow (14), between right wrist (16) and right shoulder (12).
+			// Arm straight: angle of right elbow (14), between right wrist (16) and right shoulder (12).
+			// A straight line looks straight from any camera angle, so this works side-on.
 			{
 				kind: "angle",
 				vertex: POSE.rightElbow,
 				points: [POSE.rightWrist, POSE.rightShoulder],
 				target: 180,
+				tolerance: 5,
+			},
+			// Arm horizontal: tilt of the upper arm, right shoulder (12) → right elbow (14), from vertical.
+			// Arm hanging down = 0°, horizontal = 90°. (Not the hip: its landmark is unstable.)
+			{
+				kind: "inclination",
+				points: [POSE.rightShoulder, POSE.rightElbow],
+				target: 90,
 				tolerance: 5,
 			},
 		],
@@ -81,6 +104,7 @@ export const MRC_JOINTS: MrcJoint[] = [
 		description: "Assess the elbow joint.",
 		repetitions: 5,
 		sides: ["right", "left"],
+		camera: "side",
 		measures: [],
 	},
 	{
@@ -90,6 +114,7 @@ export const MRC_JOINTS: MrcJoint[] = [
 		description: "Assess the wrist joint.",
 		repetitions: 5,
 		sides: ["right", "left"],
+		camera: "side",
 		measures: [],
 	},
 	{
@@ -99,6 +124,7 @@ export const MRC_JOINTS: MrcJoint[] = [
 		description: "Assess the hip joint.",
 		repetitions: 5,
 		sides: ["right", "left"],
+		camera: "side",
 		measures: [],
 	},
 	{
@@ -108,6 +134,7 @@ export const MRC_JOINTS: MrcJoint[] = [
 		description: "Assess the knee joint.",
 		repetitions: 5,
 		sides: ["right", "left"],
+		camera: "side",
 		measures: [],
 	},
 	{
@@ -117,17 +144,27 @@ export const MRC_JOINTS: MrcJoint[] = [
 		description: "Assess the ankle joint.",
 		repetitions: 5,
 		sides: ["right", "left"],
+		camera: "side",
 		measures: [],
 	},
 ];
 
 export const getMrcJoint = (id: string): MrcJoint | undefined => MRC_JOINTS.find((joint) => joint.id === id);
 
-// Display name, e.g. "Angle of left shoulder" or "Alignment of left hip and right hip".
-export const getMeasureLabel = (measure: MrcMeasure): string =>
-	measure.kind === "angle" ?
-		`Angle of ${POSE_LANDMARK_NAMES[measure.vertex]}`
-	:	`Alignment of ${POSE_LANDMARK_NAMES[measure.points[0]]} and ${POSE_LANDMARK_NAMES[measure.points[1]]}`;
+// The landmark where the measured angle sits (drawn large, with the value label), if any.
+export const getMeasureVertex = (measure: MrcMeasure): PoseLandmarkIndex | null =>
+	measure.kind === "angle" ? measure.vertex
+	: measure.kind === "inclination" ? measure.points[0]
+	: null;
+
+// Display name, e.g. "Angle of left shoulder", "Angle of right shoulder (from vertical)"
+// or "Alignment of left hip and right hip".
+export const getMeasureLabel = (measure: MrcMeasure): string => {
+	const name = (i: PoseLandmarkIndex) => POSE_LANDMARK_NAMES[i];
+	if (measure.kind === "angle") return `Angle of ${name(measure.vertex)}`;
+	if (measure.kind === "inclination") return `Angle of ${name(measure.points[0])} (from vertical)`;
+	return `Alignment of ${name(measure.points[0])} and ${name(measure.points[1])}`;
+};
 
 // --- Generated per-side tests -------------------------------------------------
 

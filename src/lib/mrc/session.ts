@@ -16,7 +16,7 @@ export type MrcStatusLevel = "good" | "warning" | "bad" | "unknown";
 // measure it this frame (e.g. landmark not visible).
 export type MrcMetric = {
 	id: string;
-	kind: "angle" | "alignment";
+	kind: MrcMeasure["kind"];
 	label: string;
 	value: number | null;
 	target: number;
@@ -36,7 +36,7 @@ export type MrcSession = {
 	recommendations: string[];
 };
 
-export const METRIC_UNIT: Record<MrcMetric["kind"], string> = { angle: "°", alignment: " cm" };
+export const METRIC_UNIT: Record<MrcMetric["kind"], string> = { angle: "°", inclination: "°", alignment: " cm" };
 
 // good: within tolerance · warning: within 2× tolerance · bad: beyond that.
 export const getMetricLevel = ({

@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import { PoseFrame } from "@/hooks/use-pose-stream";
-import { MrcMeasure } from "@/lib/mrc/joints";
+import { getMeasureVertex, MrcMeasure } from "@/lib/mrc/joints";
 import { computeMeasure, MIN_MEASURE_VISIBILITY } from "@/lib/mrc/measure";
 import { getMetricLevel, METRIC_UNIT, MrcStatusLevel } from "@/lib/mrc/session";
 import { POSE_CONNECTIONS } from "@/lib/pose/landmarks";
@@ -43,7 +43,7 @@ export default function PoseOverlay({
 		const ctx = canvas?.getContext("2d");
 		if (!canvas || !ctx) return;
 
-		const vertices = new Set(measures.flatMap((m) => (m.kind === "angle" ? [m.vertex] : [])));
+		const vertices = new Set(measures.flatMap((m) => getMeasureVertex(m) ?? []));
 		const references = new Set(measures.flatMap((m) => m.points).filter((i) => !vertices.has(i)));
 		let rafId = 0;
 		let drawnTime = -1;
@@ -111,7 +111,7 @@ export default function PoseOverlay({
 
 			// 2. Measured segments, coloured by each measure's live status.
 			const results = measures.map((measure) => {
-				const value = computeMeasure(measure, frame.worldLandmarks, landmarks);
+				const value = computeMeasure(measure, frame);
 				return {
 					measure,
 					value,
@@ -124,6 +124,20 @@ export default function PoseOverlay({
 				if (measure.kind === "angle") {
 					line(measure.vertex, measure.points[0]);
 					line(measure.vertex, measure.points[1]);
+				} else if (measure.kind === "inclination") {
+					const [from, to] = measure.points;
+					line(from, to);
+					// Dashed vertical reference (straight down), same length as the segment.
+					const length = Math.hypot(px(to) - px(from), py(to) - py(from));
+					ctx.save();
+					ctx.lineWidth = 2;
+					ctx.strokeStyle = COLOR.ring;
+					ctx.setLineDash([6, 6]);
+					ctx.beginPath();
+					ctx.moveTo(px(from), py(from));
+					ctx.lineTo(px(from), py(from) + length);
+					ctx.stroke();
+					ctx.restore();
 				} else {
 					ctx.setLineDash([10, 8]);
 					line(measure.points[0], measure.points[1]);
@@ -137,17 +151,17 @@ export default function PoseOverlay({
 				if (!visible(i)) ring(i, 11, LEVEL_COLOR.unknown, true);
 			}
 
-			// 4. Measured joints (angle vertex): larger dot + white ring + value label.
+			// 4. Measured joints (angle vertex / inclination start): larger dot + white ring + value label.
 			ctx.font = "bold 16px sans-serif";
 			ctx.textBaseline = "middle";
 			for (const { measure, value, level } of results) {
-				if (measure.kind !== "angle") continue;
-				const i = measure.vertex;
+				const i = getMeasureVertex(measure);
+				if (i === null) continue;
 				dot(i, 9, LEVEL_COLOR[level]);
 				ring(i, 11, COLOR.ring);
 				if (!visible(i)) ring(i, 16, LEVEL_COLOR.unknown, true);
 
-				const text = value === null ? "—" : `${Math.round(value)}${METRIC_UNIT.angle}`;
+				const text = value === null ? "—" : `${Math.round(value)}${METRIC_UNIT[measure.kind]}`;
 				// Flip the text back so it reads normally on the mirrored canvas.
 				ctx.save();
 				ctx.translate(px(i), py(i));

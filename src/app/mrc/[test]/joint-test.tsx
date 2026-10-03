@@ -10,7 +10,9 @@ import {
 	PauseIcon,
 	PlayIcon,
 	RotateCcwIcon,
+	RotateCwIcon,
 	Undo2Icon,
+	VideoIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -20,7 +22,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import useCamera from "@/hooks/use-camera";
 import usePoseStream, { PoseStreamStatus } from "@/hooks/use-pose-stream";
 import { MRC_SIDE_LABEL, MRC_TESTS, MrcTest } from "@/lib/mrc/joints";
-import { computeMeasure } from "@/lib/mrc/measure";
+import { computeMeasure, FACING_RATIO_THRESHOLD, getShoulderWidthRatio } from "@/lib/mrc/measure";
 import { mrcTestHref } from "@/lib/mrc/routes";
 import { buildMetrics, createMockSession, MrcSession } from "@/lib/mrc/session";
 
@@ -55,14 +57,34 @@ export default function JointTest({
 
 	// Live measure values from the (smoothed) pose, refreshed 10× per second for the dashboard.
 	const [liveValues, setLiveValues] = useState<(number | null)[]>([]);
+	// Shoulder width ÷ trunk length: small = side-on, large = facing the camera.
+	const [viewRatio, setViewRatio] = useState<number | null>(null);
 	useEffect(() => {
 		const timer = setInterval(() => {
 			const frame = pose.frameRef.current;
-			setLiveValues(test.measures.map((measure) => computeMeasure(measure, frame?.worldLandmarks, frame?.landmarks)));
+			setLiveValues(test.measures.map((measure) => computeMeasure(measure, frame)));
+			setViewRatio(getShoulderWidthRatio(frame));
 		}, 100);
 		return () => clearInterval(timer);
 	}, [pose.frameRef, test.measures]);
 	const liveMetrics = buildMetrics(test.measures, liveValues);
+	const sideLabel = MRC_SIDE_LABEL[test.side].toLowerCase();
+	// Is the patient turned the way this test needs (side-on, or facing the camera)?
+	const isSideView = joint.camera === "side";
+	const isViewCorrect =
+		viewRatio === null ? null
+		: isSideView ? viewRatio <= FACING_RATIO_THRESHOLD
+		: viewRatio > FACING_RATIO_THRESHOLD;
+	const viewLabel =
+		isSideView ?
+			isViewCorrect ? "Side-on"
+			:	"Not side-on"
+		: isViewCorrect ? "Facing camera"
+		: "Not facing camera";
+	const turnMessage =
+		isSideView ?
+			`Turn the patient side-on — ${sideLabel} side toward the camera`
+		:	"Turn the patient to face the camera";
 	const poseBadge =
 		POSE_BADGE[
 			pose.status !== "ready" ? pose.status
@@ -159,6 +181,10 @@ export default function JointTest({
 					</h2>
 					<Badge>{MRC_SIDE_LABEL[test.side]} side</Badge>
 					<Badge variant="outline">{joint.region}</Badge>
+					<Badge variant="outline">
+						<VideoIcon />
+						{joint.camera === "side" ? `Camera on the patient's ${sideLabel} side` : "Camera in front of the patient"}
+					</Badge>
 					{isManual && (
 						<Badge variant="secondary">
 							<HandIcon />
@@ -178,6 +204,11 @@ export default function JointTest({
 					>
 						<div className="pointer-events-none absolute top-3 right-3 flex flex-col items-end gap-1.5">
 							<Badge className={poseBadge.className}>{poseBadge.label}</Badge>
+							{isViewCorrect !== null && (
+								<Badge className={isViewCorrect ? "bg-green-600 text-white" : "bg-amber-500 text-white"}>
+									{viewLabel} ({viewRatio?.toFixed(2)})
+								</Badge>
+							)}
 							{test.measures.length > 0 && (
 								<Badge className="gap-2 bg-black/70 text-white">
 									{(
@@ -195,6 +226,12 @@ export default function JointTest({
 								</Badge>
 							)}
 						</div>
+						{isViewCorrect === false && (
+							<div className="pointer-events-none absolute top-1/2 left-1/2 flex -translate-1/2 items-center gap-2 rounded-lg bg-amber-500/95 px-5 py-3 text-base font-semibold text-white shadow-lg">
+								<RotateCwIcon className="size-5" />
+								{turnMessage}
+							</div>
+						)}
 						<div className="pointer-events-none absolute top-12 left-3 rounded-lg bg-black/60 px-4 py-2 text-white">
 							<span className="text-xs tracking-wider text-white/70 uppercase">Repetition</span>
 							<p className="text-3xl font-bold tabular-nums">
