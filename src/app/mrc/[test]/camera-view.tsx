@@ -34,16 +34,21 @@ const STATUS_SCREEN: Record<
 };
 
 export default function CameraView({
+	camera,
 	mirrored = true,
+	overlay,
 	onScreenClick,
 	children,
 }: {
+	camera: ReturnType<typeof useCamera>;
 	mirrored?: boolean;
+	// Drawn over the video inside the mirrored box (e.g. the pose skeleton).
+	overlay?: React.ReactNode;
 	// When set, the whole camera screen acts as a button (e.g. tap to start/stop a repetition).
 	onScreenClick?: () => void;
 	children?: React.ReactNode;
 }) {
-	const { videoRef, status, retry } = useCamera();
+	const { videoRef, status, retry } = camera;
 	const screen = status === "active" ? null : STATUS_SCREEN[status];
 	const isClickable = onScreenClick !== undefined && status === "active";
 
@@ -68,8 +73,7 @@ export default function CameraView({
 			{/* Video + overlay canvas are mirrored together so drawn landmarks stay aligned. */}
 			<div className={cn("absolute inset-0", mirrored && "-scale-x-100")}>
 				<video className="h-full w-full object-contain" ref={videoRef} muted playsInline autoPlay />
-				{/* Overlay for the skeleton — left empty until the pose model is connected. */}
-				<canvas className="pointer-events-none absolute inset-0 h-full w-full" />
+				{status === "active" && overlay}
 			</div>
 
 			{screen && (
@@ -91,9 +95,6 @@ export default function CameraView({
 					<Badge className="absolute top-3 left-3 bg-red-600 text-white">
 						<span className="size-1.5 animate-pulse rounded-full bg-white" />
 						LIVE
-					</Badge>
-					<Badge variant="secondary" className="absolute top-3 right-3 opacity-80">
-						Pose model not connected
 					</Badge>
 					{children}
 				</>

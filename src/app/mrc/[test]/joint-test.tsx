@@ -17,12 +17,23 @@ import { useEffect, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
+import useCamera from "@/hooks/use-camera";
+import usePoseStream, { PoseStreamStatus } from "@/hooks/use-pose-stream";
 import { MRC_SIDE_LABEL, MRC_TESTS, MrcTest } from "@/lib/mrc/joints";
 import { mrcTestHref } from "@/lib/mrc/routes";
 import { createMockSession, MrcSession } from "@/lib/mrc/session";
 
 import CameraView from "./camera-view";
+import PoseOverlay from "./pose-overlay";
 import { AngleDashboardCard, FormStatusCard, RecommendationsCard, SessionCard } from "./session-cards";
+
+const POSE_BADGE: Record<PoseStreamStatus | "tracking" | "no-person", { label: string; className: string }> = {
+	loading: { label: "Loading pose model…", className: "bg-black/70 text-white" },
+	error: { label: "Pose model failed to load", className: "bg-red-600 text-white" },
+	ready: { label: "Pose model ready", className: "bg-black/70 text-white" },
+	tracking: { label: "Tracking", className: "bg-green-600 text-white" },
+	"no-person": { label: "No person detected", className: "bg-amber-500 text-white" },
+};
 
 export default function JointTest({
 	test,
@@ -38,6 +49,14 @@ export default function JointTest({
 	const { joint } = test;
 	// TODO: replace the mock with live data from the pose model.
 	const [session, setSession] = useState<MrcSession>(() => createMockSession(test));
+	const camera = useCamera();
+	const pose = usePoseStream(camera.videoRef);
+	const poseBadge =
+		POSE_BADGE[
+			pose.status !== "ready" ? pose.status
+			: pose.hasPerson ? "tracking"
+			: "no-person"
+		];
 	const index = MRC_TESTS.findIndex(({ id }) => id === test.id);
 
 	// --- Manual mode (no force device): the doctor taps the screen to start/stop each repetition.
@@ -140,7 +159,20 @@ export default function JointTest({
 			<div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
 				{/* Left: camera + controls */}
 				<div className="flex flex-col gap-4">
-					<CameraView onScreenClick={isManual ? toggleRep : undefined}>
+					<CameraView
+						camera={camera}
+						overlay={<PoseOverlay frameRef={pose.frameRef} measures={test.measures} />}
+						onScreenClick={isManual ? toggleRep : undefined}
+					>
+						<div className="pointer-events-none absolute top-3 right-3 flex flex-col items-end gap-1.5">
+							<Badge className={poseBadge.className}>{poseBadge.label}</Badge>
+							{test.measures.length > 0 && (
+								<Badge className="bg-black/70 text-white">
+									<span className="size-2 rounded-full bg-amber-400" />
+									Joints used in this test
+								</Badge>
+							)}
+						</div>
 						<div className="pointer-events-none absolute top-12 left-3 rounded-lg bg-black/60 px-4 py-2 text-white">
 							<span className="text-xs tracking-wider text-white/70 uppercase">Repetition</span>
 							<p className="text-3xl font-bold tabular-nums">
