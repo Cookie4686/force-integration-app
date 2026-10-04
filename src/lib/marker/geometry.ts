@@ -11,6 +11,9 @@ export const MARKER_COUNT = 250;
 // lets random texture decode as a (wrong) marker; clear real markers read with 0–2.
 export const MARKER_MAX_HAMMING = 4;
 
+// Marker id printed on the force device.
+export const DEFAULT_DEVICE_MARKER_ID = 0;
+
 // Side of the printed black square, in centimetres.
 export const DEFAULT_MARKER_SIZE_CM = 5;
 
@@ -61,6 +64,16 @@ export const toDetectedMarkers = (
 			sidePx: edges / corners.length / scale,
 		};
 	});
+
+// A marker from the latest detection, or null when it is not in view or the
+// detection is older than `maxAgeMs` (detector stalled).
+export const findMarker = (
+	frame: MarkerFrame | null,
+	id: number,
+	now = performance.now(),
+	maxAgeMs = 500
+): DetectedMarker | null =>
+	frame && now - frame.time <= maxAgeMs ? (frame.markers.find((marker) => marker.id === id) ?? null) : null;
 
 // Pixels per centimetre at the marker's distance, from its known printed size.
 export const pixelsPerCm = (marker: DetectedMarker, markerSizeCm: number): number => marker.sidePx / markerSizeCm;

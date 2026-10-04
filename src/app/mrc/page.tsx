@@ -25,7 +25,7 @@ const TEST_MODES = [
 		icon: WeightIcon,
 		title: "With force device",
 		description: "Repetitions follow the Bluetooth force reading.",
-		note: "In development",
+		note: null,
 	},
 	{
 		manual: true,
@@ -38,7 +38,7 @@ const TEST_MODES = [
 
 export default function PageMRC() {
 	// No force device available yet, so manual mode is the default.
-	const [manual, setManual] = useState(true);
+	const [manual, setManual] = useState(false);
 	// The test the user clicked "Start" on; opens the popup asking for test name + patient.
 	const [startRequest, setStartRequest] = useState<StartRequest | null>(null);
 

@@ -73,7 +73,7 @@ export const MRC_JOINTS: MrcJoint[] = [
 		name: "Shoulder",
 		region: "Upper limb",
 		description: "Shoulder extension.",
-		repetitions: 5,
+		repetitions: 3,
 		sides: ["right", "left"],
 		camera: "front",
 		measures: [
@@ -84,7 +84,7 @@ export const MRC_JOINTS: MrcJoint[] = [
 				vertex: POSE.rightElbow,
 				points: [POSE.rightWrist, POSE.rightShoulder],
 				target: 180,
-				tolerance: 5,
+				tolerance: 10,
 			},
 			// Arm horizontal: tilt of the upper arm, right shoulder (12) → right elbow (14), from vertical.
 			// Arm hanging down = 0°, horizontal = 90°. (Not the hip: its landmark is unstable.)
@@ -141,7 +141,7 @@ export const MRC_JOINTS: MrcJoint[] = [
 		id: "ankle",
 		name: "Ankle",
 		region: "Lower limb",
-		description: "Assess the ankle joint.",
+		description: "Foot dorsiflexors.",
 		repetitions: 5,
 		sides: ["right", "left"],
 		camera: "side",
@@ -150,6 +150,44 @@ export const MRC_JOINTS: MrcJoint[] = [
 ];
 
 export const getMrcJoint = (id: string): MrcJoint | undefined => MRC_JOINTS.find((joint) => joint.id === id);
+
+// --- Force device position ------------------------------------------------------
+
+// Where the force device (its marker centre) must be during a push, per joint.
+// Written for the RIGHT side like `measures`; left-side tests are mirrored.
+//
+// "between": on the limb segment from→to, closer to `to` than to `from`
+//   (past the midpoint), and at most `maxOffsetCm` away from the from→to line
+//   (the marker sits on the device's side, so it is never exactly on the line).
+// "near": within `maxDistanceCm` of `landmark`.
+//
+// Centimetres come from the marker's printed size, so they are measured at the
+// device's distance from the camera.
+export type MrcDevicePlacement =
+	| { kind: "between"; from: PoseLandmarkIndex; to: PoseLandmarkIndex; maxOffsetCm: number }
+	| { kind: "near"; landmark: PoseLandmarkIndex; maxDistanceCm: number };
+
+export const MRC_DEVICE_PLACEMENT: Record<MrcJointId, MrcDevicePlacement> = {
+	// Upper arm, near the elbow.
+	shoulder: { kind: "between", from: POSE.rightShoulder, to: POSE.rightElbow, maxOffsetCm: 15 },
+	// Forearm, near the wrist.
+	elbow: { kind: "between", from: POSE.rightElbow, to: POSE.rightWrist, maxOffsetCm: 15 },
+	wrist: { kind: "near", landmark: POSE.rightWrist, maxDistanceCm: 10 },
+	// Thigh, near the knee.
+	hip: { kind: "between", from: POSE.rightHip, to: POSE.rightKnee, maxOffsetCm: 15 },
+	// Shin, near the ankle.
+	knee: { kind: "between", from: POSE.rightKnee, to: POSE.rightAnkle, maxOffsetCm: 15 },
+	// Foot dorsiflexors: on the top of the foot.
+	ankle: { kind: "near", landmark: POSE.rightFootIndex, maxDistanceCm: 10 },
+};
+
+// e.g. "Between right shoulder and right elbow, closer to the right elbow" or "Within 10 cm of the right wrist".
+export const getDevicePlacementLabel = (placement: MrcDevicePlacement): string => {
+	const name = (i: PoseLandmarkIndex) => POSE_LANDMARK_NAMES[i];
+	return placement.kind === "between" ?
+			`Between ${name(placement.from)} and ${name(placement.to)}, closer to the ${name(placement.to)}`
+		:	`Within ${placement.maxDistanceCm} cm of the ${name(placement.landmark)}`;
+};
 
 // The landmark where the measured angle sits (drawn large, with the value label), if any.
 export const getMeasureVertex = (measure: MrcMeasure): PoseLandmarkIndex | null =>
@@ -175,7 +213,14 @@ export type MrcTest = {
 	joint: MrcJoint;
 	side: MrcSide;
 	measures: MrcMeasure[];
+	// Where the force device must be (force-device mode).
+	device: MrcDevicePlacement;
 };
+
+const mirrorDevicePlacement = (placement: MrcDevicePlacement): MrcDevicePlacement =>
+	placement.kind === "between" ?
+		{ ...placement, from: POSE_MIRROR[placement.from], to: POSE_MIRROR[placement.to] }
+	:	{ ...placement, landmark: POSE_MIRROR[placement.landmark] };
 
 const mirrorMeasure = (measure: MrcMeasure): MrcMeasure => {
 	const points: [PoseLandmarkIndex, PoseLandmarkIndex] = [
@@ -194,6 +239,7 @@ export const MRC_TESTS: MrcTest[] = MRC_JOINTS.flatMap((joint) =>
 		joint,
 		side,
 		measures: side === "right" ? joint.measures : joint.measures.map(mirrorMeasure),
+		device: side === "right" ? MRC_DEVICE_PLACEMENT[joint.id] : mirrorDevicePlacement(MRC_DEVICE_PLACEMENT[joint.id]),
 	}))
 );
 

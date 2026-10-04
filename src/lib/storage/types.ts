@@ -68,7 +68,31 @@ export type RepMetric = {
 };
 
 // Measure values over the rep: values[sample][measure], one sample every intervalMs.
-export type RepRecording = { intervalMs: number; values: (number | null)[][] };
+// Force-device mode also records the device position per sample
+// (true = correct, false = wrong, null = could not be checked).
+export type RepRecording = { intervalMs: number; values: (number | null)[][]; device?: (boolean | null)[] };
+
+// Force-device mode: the push, from the device's own samples.
+export type RepForce = {
+	peakKg: number;
+	meanKg: number;
+	// From the start of the push (force over the start threshold) to the peak.
+	timeToPeakMs: number;
+	// The device reported an overload/error sample.
+	overload: boolean;
+	// Raw samples: t = ms since the push started (device clock), kg = force.
+	samples: { t: number[]; kg: number[] };
+};
+
+// Force-device mode: where the device was during the push.
+export type RepDevice = {
+	// Share of samples where the position could be checked (marker and landmarks visible), 0–100.
+	seenPct: number;
+	// Share of checked samples where the device was in the correct place, 0–100.
+	inPlacePct: number | null;
+	// The marker was never seen (no marker used): the position was assumed correct, not checked.
+	assumed?: boolean;
+};
 
 export type RepResult = {
 	index: number; // 1-based
@@ -76,4 +100,9 @@ export type RepResult = {
 	durationMs: number;
 	metrics: RepMetric[];
 	recording: RepRecording;
+	// Force-device mode only.
+	force?: RepForce;
+	device?: RepDevice;
+	// Problems noticed during the rep, shown to the doctor (e.g. "Device off position for 40% of the push").
+	warnings?: string[];
 };

@@ -24,9 +24,11 @@ export default async function PageMRCTest({ params, searchParams }: PageProps<"/
 	const nextTest = isSequence ? MRC_TESTS[MRC_TESTS.indexOf(test) + 1] : undefined;
 
 	// Continuing a record (or a refreshed page): pick up this test's reps already saved.
-	const saved = session && isManual && isValidId(session.id) ? await readSession(session.id) : null;
-	const savedRepDurationsMs =
-		saved?.tests.find((item) => item.testId === test.id)?.reps.map((rep) => rep.durationMs) ?? [];
+	const saved = session && isValidId(session.id) ? await readSession(session.id) : null;
+	const savedReps =
+		saved?.tests
+			.find((item) => item.testId === test.id)
+			?.reps.map((rep) => ({ durationMs: rep.durationMs, peakKg: rep.force?.peakKg, warnings: rep.warnings })) ?? [];
 
 	// key: start a fresh session (and camera) when moving to the next test.
 	return (
@@ -37,7 +39,7 @@ export default async function PageMRCTest({ params, searchParams }: PageProps<"/
 			isManual={isManual}
 			nextTest={nextTest}
 			session={session}
-			savedRepDurationsMs={savedRepDurationsMs}
+			savedReps={savedReps}
 		/>
 	);
 }

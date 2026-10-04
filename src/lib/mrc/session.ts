@@ -24,6 +24,14 @@ export type MrcMetric = {
 	tolerance: number;
 };
 
+// A finished repetition, as listed in the Session card.
+export type MrcRepSummary = {
+	durationMs: number;
+	// Force-device mode only.
+	peakKg?: number;
+	warnings?: string[];
+};
+
 export type MrcFormCheck = { label: string; ok: boolean };
 
 export type MrcSession = {

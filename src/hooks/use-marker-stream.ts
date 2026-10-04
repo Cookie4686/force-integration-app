@@ -14,12 +14,14 @@ export type MarkerStreamStatus = "ready" | "error";
 
 // Detects ArUco markers on every new frame of `videoRef` in a Web Worker.
 // Results go into `frameRef` (not state), so drawing never re-renders React.
-export default function useMarkerStream(videoRef: React.RefObject<HTMLVideoElement | null>) {
+// With `enabled` false, no worker is started.
+export default function useMarkerStream(videoRef: React.RefObject<HTMLVideoElement | null>, enabled = true) {
 	const frameRef = useRef<MarkerFrame | null>(null);
 	const [status, setStatus] = useState<MarkerStreamStatus>("ready");
 	const apiRef = useRef<Comlink.Remote<MarkerDetectorWorker> | null>(null);
 
 	useEffect(() => {
+		if (!enabled) return;
 		const worker = new Worker(WORKER_FILE_PATH);
 		const api = Comlink.wrap<MarkerDetectorWorker>(worker);
 		apiRef.current = api;
@@ -65,7 +67,7 @@ export default function useMarkerStream(videoRef: React.RefObject<HTMLVideoEleme
 			api[Comlink.releaseProxy]();
 			worker.terminate();
 		};
-	}, [videoRef]);
+	}, [videoRef, enabled]);
 
 	// Printable marker SVG, generated in the worker (keeps js-aruco2 out of the page bundle).
 	const getMarkerSvg = useCallback(

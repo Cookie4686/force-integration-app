@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import useCamera from "@/hooks/use-camera";
 import useMarkerStream from "@/hooks/use-marker-stream";
 import {
+	DEFAULT_DEVICE_MARKER_ID,
 	DEFAULT_MARKER_SIZE_CM,
 	DetectedMarker,
 	MARKER_COUNT,
@@ -53,7 +54,7 @@ export default function PageToolMarker() {
 	const camera = useCamera({ width: 1920, height: 1080 });
 	const marker = useMarkerStream(camera.videoRef);
 	const { getMarkerSvg } = marker;
-	const [deviceMarkerId, setDeviceMarkerId] = useState(0);
+	const [deviceMarkerId, setDeviceMarkerId] = useState(DEFAULT_DEVICE_MARKER_ID);
 	const [markerSizeCm, setMarkerSizeCm] = useState(DEFAULT_MARKER_SIZE_CM);
 	const [stats, setStats] = useState<Stats>({ device: null, otherIds: [], detectMs: null, rateHz: 0, frame: null });
 	// Recent (time, detection count) samples: rate = detections done ÷ time passed.

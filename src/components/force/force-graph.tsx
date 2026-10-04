@@ -37,11 +37,14 @@ export default function ForceGraph({
 	samplesRef,
 	windowSeconds = 15,
 	unit = "kg",
+	thresholdKg,
 	className,
 }: {
 	samplesRef: React.RefObject<HhdSample[]>;
 	windowSeconds?: number;
 	unit?: "kg" | "N";
+	// Drawn as a dashed line (e.g. the force that starts a repetition).
+	thresholdKg?: number;
 	className?: string;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -87,7 +90,7 @@ export default function ForceGraph({
 			while (first > 0 && samples[first - 1].timestampMs / 1000 >= tStart) first--;
 			first = Math.max(0, first - 1);
 
-			let maxValue = 0;
+			let maxValue = thresholdKg === undefined ? 0 : thresholdKg * scale;
 			for (let i = first; i < samples.length; i++) maxValue = Math.max(maxValue, samples[i].forceKg * scale);
 			const step = niceStep(Math.max(maxValue * 1.15, 5 * scale) / 5);
 			const yMax = Math.ceil(Math.max(maxValue * 1.15, 5 * scale) / step) * step;
@@ -120,6 +123,22 @@ export default function ForceGraph({
 				ctx.stroke();
 				ctx.globalAlpha = 1;
 				if (ago % 5 === 0) ctx.fillText(ago === 0 ? "now" : `-${ago} s`, gx, PAD.top + plotH + 6);
+			}
+
+			if (thresholdKg !== undefined) {
+				const ty = Math.round(y(thresholdKg * scale)) + 0.5;
+				ctx.save();
+				ctx.strokeStyle = theme.alert;
+				ctx.fillStyle = theme.alert;
+				ctx.setLineDash([6, 4]);
+				ctx.beginPath();
+				ctx.moveTo(PAD.left, ty);
+				ctx.lineTo(PAD.left + plotW, ty);
+				ctx.stroke();
+				ctx.textAlign = "left";
+				ctx.textBaseline = "bottom";
+				ctx.fillText("start", PAD.left + 4, ty - 2);
+				ctx.restore();
 			}
 
 			if (!latest) {
@@ -161,7 +180,7 @@ export default function ForceGraph({
 
 		rafId = requestAnimationFrame(draw);
 		return () => cancelAnimationFrame(rafId);
-	}, [samplesRef, windowSeconds, unit]);
+	}, [samplesRef, windowSeconds, unit, thresholdKg]);
 
 	return <canvas className={cn("block h-72 w-full", className)} ref={canvasRef} />;
 }

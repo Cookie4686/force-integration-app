@@ -1,4 +1,6 @@
-// CSV export of one session: one row per repetition × measure.
+// CSV export of one session: one row per repetition × measure (one row per
+// repetition when the test has no measures). Force columns are empty without
+// the force device.
 
 import type { Patient, Session } from "./types";
 
@@ -21,6 +23,13 @@ const HEADER = [
 	"mean",
 	"in_tolerance_pct",
 	"valid_pct",
+	"peak_force_kg",
+	"mean_force_kg",
+	"time_to_peak_s",
+	"device_seen_pct",
+	"device_in_place_pct",
+	"device_assumed",
+	"warnings",
 ];
 
 const cell = (value: string | number | null): string => {
@@ -34,8 +43,9 @@ export const buildSessionCsv = (session: Session, patient: Patient | null): stri
 	const rows: (string | number | null)[][] = [HEADER];
 	for (const test of session.tests) {
 		for (const rep of test.reps) {
-			test.measures.forEach((measure, m) => {
-				const metric = rep.metrics[m];
+			const measures = test.measures.length > 0 ? test.measures : [null];
+			measures.forEach((measure, m) => {
+				const metric = measure ? rep.metrics[m] : undefined;
 				rows.push([
 					patient?.name ?? "",
 					patient?.hn ?? "",
@@ -47,14 +57,21 @@ export const buildSessionCsv = (session: Session, patient: Patient | null): stri
 					test.status,
 					rep.index,
 					Math.round(rep.durationMs / 100) / 10,
-					measure.label,
-					measure.target,
-					measure.tolerance,
+					measure?.label ?? null,
+					measure?.target ?? null,
+					measure?.tolerance ?? null,
 					metric?.min ?? null,
 					metric?.max ?? null,
 					metric?.mean ?? null,
 					metric?.inTolerancePct ?? null,
 					metric?.validPct ?? null,
+					rep.force?.peakKg ?? null,
+					rep.force?.meanKg ?? null,
+					rep.force ? Math.round(rep.force.timeToPeakMs / 100) / 10 : null,
+					rep.device?.seenPct ?? null,
+					rep.device?.inPlacePct ?? null,
+					rep.device ? String(rep.device.assumed === true) : null,
+					rep.warnings?.join("; ") ?? null,
 				]);
 			});
 		}

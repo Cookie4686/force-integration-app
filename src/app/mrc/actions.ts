@@ -5,7 +5,7 @@
 // A session file is only written once its first repetition is saved, so opening a
 // test or a mis-click never leaves an empty session behind.
 
-import type { Patient, RepResult, Session, SessionDraft, SessionMode, TestResult } from "@/lib/storage/types";
+import type { Patient, RepForce, RepResult, Session, SessionDraft, SessionMode, TestResult } from "@/lib/storage/types";
 
 import { getMeasureLabel, getMrcTest } from "@/lib/mrc/joints";
 import { addPatient, isValidId, newId, readPatients, updateExistingSession, upsertSession } from "@/lib/storage/files";
@@ -44,9 +44,39 @@ const assertRep = (rep: RepResult, measureCount: number) => {
 		&& rep.recording.values.length <= MAX_RECORDING_SAMPLES
 		&& rep.recording.values.every(
 			(row) => Array.isArray(row) && row.length === measureCount && row.every(isNumberOrNull)
-		);
+		)
+		&& (rep.recording.device === undefined
+			|| (Array.isArray(rep.recording.device)
+				&& rep.recording.device.length <= MAX_RECORDING_SAMPLES
+				&& rep.recording.device.every((value) => value === null || typeof value === "boolean")))
+		&& (rep.force === undefined || isValidForce(rep.force))
+		&& (rep.device === undefined
+			|| (isFiniteNumber(rep.device?.seenPct)
+				&& isNumberOrNull(rep.device.inPlacePct)
+				&& (rep.device.assumed === undefined || typeof rep.device.assumed === "boolean")))
+		&& (rep.warnings === undefined
+			|| (Array.isArray(rep.warnings)
+				&& rep.warnings.length <= 20
+				&& rep.warnings.every((text) => typeof text === "string" && text.length <= 200)));
 	if (!valid) throw new Error("Invalid repetition data.");
 };
+
+const isFiniteNumber = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
+
+// The device sends ~80 samples per second → this is over 20 minutes of pushing.
+const MAX_FORCE_SAMPLES = 100_000;
+
+const isValidForce = (force: RepForce) =>
+	typeof force === "object"
+	&& force !== null
+	&& [force.peakKg, force.meanKg, force.timeToPeakMs].every(isFiniteNumber)
+	&& typeof force.overload === "boolean"
+	&& Array.isArray(force.samples?.t)
+	&& Array.isArray(force.samples.kg)
+	&& force.samples.t.length === force.samples.kg.length
+	&& force.samples.t.length <= MAX_FORCE_SAMPLES
+	&& force.samples.t.every(isFiniteNumber)
+	&& force.samples.kg.every(isFiniteNumber);
 
 // --- Patients --------------------------------------------------------------------
 

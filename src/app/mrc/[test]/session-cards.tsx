@@ -8,6 +8,7 @@ import {
 	getMetricLevel,
 	METRIC_UNIT,
 	MrcMetric,
+	MrcRepSummary,
 	MrcSession,
 	MrcSessionStatus,
 	MrcStatusLevel,
@@ -48,12 +49,12 @@ const formatMetric = (kind: MrcMetric["kind"], value: number) =>
 export function SessionCard({
 	session,
 	repetitions,
-	repDurationsMs,
+	reps,
 }: {
 	session: MrcSession;
 	repetitions: number;
-	// Duration of each completed repetition, when known (manual mode).
-	repDurationsMs?: number[];
+	// Completed repetitions, when known.
+	reps?: MrcRepSummary[];
 }) {
 	return (
 		<Card>
@@ -85,15 +86,27 @@ export function SessionCard({
 					<ProgressLabel>Session timeline</ProgressLabel>
 					<ProgressValue />
 				</Progress>
-				{repDurationsMs && repDurationsMs.length > 0 && (
+				{reps && reps.length > 0 && (
 					<div className="flex flex-col gap-2">
-						<span className="text-sm font-medium">Repetition time</span>
+						<span className="text-sm font-medium">Repetitions done</span>
 						<div className="flex flex-wrap gap-1.5">
-							{repDurationsMs.map((durationMs, idx) => (
-								<span className="rounded-md border px-2 py-0.5 text-xs tabular-nums" key={idx}>
-									#{idx + 1} · {(durationMs / 1000).toFixed(1)} s
-								</span>
-							))}
+							{reps.map((rep, idx) => {
+								const warned = (rep.warnings?.length ?? 0) > 0;
+								return (
+									<span
+										className={cn(
+											"flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs tabular-nums",
+											warned && "border-amber-500/60 bg-amber-500/10"
+										)}
+										key={idx}
+										title={warned ? rep.warnings?.join("\n") : undefined}
+									>
+										{warned && <TriangleAlertIcon className="size-3 text-amber-600" />}#{idx + 1} ·{" "}
+										{(rep.durationMs / 1000).toFixed(1)} s
+										{rep.peakKg !== undefined && <> · {rep.peakKg.toFixed(1)} kg</>}
+									</span>
+								);
+							})}
 						</div>
 					</div>
 				)}
