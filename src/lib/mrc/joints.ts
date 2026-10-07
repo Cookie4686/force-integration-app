@@ -105,7 +105,20 @@ export const MRC_JOINTS: MrcJoint[] = [
 		repetitions: 5,
 		sides: ["right", "left"],
 		camera: "side",
-		measures: [],
+		measures: [
+			{
+				kind: "inclination",
+				points: [POSE.rightWrist, POSE.rightElbow],
+				target: 90,
+				tolerance: 5,
+			},
+			{
+				kind: "inclination",
+				points: [POSE.rightHip, POSE.rightShoulder],
+				target: 180,
+				tolerance: 10,
+			},
+		],
 	},
 	{
 		id: "wrist",

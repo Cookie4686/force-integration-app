@@ -14,14 +14,18 @@ import { DEFAULT_PROCESSING_SETTINGS, PoseProcessingSettings, PoseProcessor } fr
 // Bundled from src/lib/mediapipe/workers/pose.worker.ts by copy-wasm.mjs.
 const WORKER_FILE_PATH = "/workers/pose.worker.js";
 
-// Smoothing for the test screen, using the same filters as /tool/pose.
+// Smoothing for the test screen: the team's researched pipeline from /tool/pose
+// (lib/pose/processing.ts), applied per landmark in this order on MediaPipe's
+// normalized 0..1 coordinates (converted to pixels only when angles are computed):
+//   1. Confidence threshold — ignore unreliable points instead of letting them pull the filters.
+//   2. One Euro — strong smoothing when still (the patient holds a position), little lag when moving fast.
+//   3. Kalman — removes the remaining jitter (random-walk model).
 // Tune the values live on /tool/pose (Video tab → Signal Processing), then copy them here.
 const SMOOTHING: PoseProcessingSettings = {
 	...DEFAULT_PROCESSING_SETTINGS,
-	// Ignore unreliable points instead of letting them pull the filter.
 	confidenceThreshold: { enabled: true, value: 0.5 },
-	// Strong smoothing when still (the patient holds a position), less lag when moving fast.
 	oneEuro: { enabled: true, minCutoff: 1.0, beta: 5, dCutoff: 1.0 },
+	kalman: { enabled: true, processNoise: 0.01, measurementNoise: 0.1 },
 };
 
 // If the tracked shoulder midpoint jumps further than this (fraction of the frame)
