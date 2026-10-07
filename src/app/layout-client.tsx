@@ -5,6 +5,7 @@ import {
 	ActivityIcon,
 	BluetoothIcon,
 	ChevronDownIcon,
+	FileVideoIcon,
 	HistoryIcon,
 	HomeIcon,
 	PersonStandingIcon,
@@ -44,8 +45,11 @@ const navItems: NavItems = [
 		],
 	},
 	{
-		groupLabel: "Test",
-		items: [{ title: "MRC", url: "/mrc", icon: ActivityIcon }],
+		groupLabel: "MRC Test",
+		items: [
+			{ title: "Realtime", url: "/mrc", icon: ActivityIcon },
+			{ title: "Video", url: "/mrc/video", icon: FileVideoIcon },
+		],
 	},
 	{
 		groupLabel: "Tools",

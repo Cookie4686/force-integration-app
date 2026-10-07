@@ -101,6 +101,7 @@ export default async function PageHistory() {
 											<TableCell className="text-right tabular-nums">{countReps(session)}</TableCell>
 											<TableCell className="whitespace-nowrap">
 												{session.mode === "manual" ? "Without force" : "With force"}
+												{session.source === "video" && " · Video"}
 											</TableCell>
 											<TableCell>
 												<Badge className={isComplete ? "bg-green-600 text-white" : "bg-amber-500 text-white"}>

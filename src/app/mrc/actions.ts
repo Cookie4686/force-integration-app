@@ -186,6 +186,48 @@ export async function saveRep(draft: SessionDraft, testId: string, rep: RepResul
 	);
 }
 
+// Saves a finished video analysis (MRC Test → Video) as a new session in one go:
+// one test, all its repetitions. Returns the session id.
+export async function saveVideoSession(input: {
+	patientId: string;
+	name: string;
+	testId: string;
+	videoName: string;
+	reps: RepResult[];
+}): Promise<string> {
+	const name = cleanSessionName(input?.name);
+	await assertPatientExists(input?.patientId);
+	const test = newTestResult(input?.testId); // also rejects an unknown test
+	const repetitions = getMrcTest(input.testId)?.joint.repetitions ?? 0;
+	if (!Array.isArray(input.reps) || input.reps.length === 0 || input.reps.length > repetitions)
+		throw new Error("Invalid repetition data.");
+	for (const rep of input.reps) assertRep(rep, test.measures.length);
+
+	const now = new Date().toISOString();
+	test.reps = input.reps.map((rep, idx) => ({ ...rep, index: idx + 1 }));
+	if (test.reps.length >= repetitions) {
+		test.status = "completed";
+		test.finishedAt = now;
+	}
+	const id = newId();
+	await upsertSession(
+		id,
+		(): Session => ({
+			id,
+			patientId: input.patientId,
+			name,
+			startedAt: now,
+			mode: "force",
+			sequence: false,
+			source: "video",
+			videoName: cleanText(input.videoName).slice(0, 200),
+			tests: [test],
+		}),
+		() => {}
+	);
+	return id;
+}
+
 // The three below change an existing session only; before the first saved rep
 // there is no file and they do nothing. Removing the last rep deletes the file.
 

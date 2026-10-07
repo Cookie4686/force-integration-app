@@ -38,6 +38,7 @@ export default function ForceGraph({
 	windowSeconds = 15,
 	unit = "kg",
 	thresholdKg,
+	fromStart = false,
 	className,
 }: {
 	samplesRef: React.RefObject<HhdSample[]>;
@@ -45,6 +46,8 @@ export default function ForceGraph({
 	unit?: "kg" | "N";
 	// Drawn as a dashed line (e.g. the force that starts a repetition).
 	thresholdKg?: number;
+	// Time axis as seconds from the start (a recorded file) instead of "-N s … now" (live).
+	fromStart?: boolean;
 	className?: string;
 }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -114,15 +117,27 @@ export default function ForceGraph({
 			}
 			ctx.textAlign = "center";
 			ctx.textBaseline = "top";
-			for (let ago = windowSeconds; ago >= 0; ago--) {
-				const gx = Math.round(x(tEnd - ago)) + 0.5;
-				ctx.globalAlpha = ago % 5 === 0 ? 1 : 0.4;
+			// Labelled line every 5 s (more apart on long recordings), faint lines every second.
+			const labelStep = windowSeconds <= 20 ? 5 : niceStep(windowSeconds / 8);
+			const lineStep = windowSeconds <= 20 ? 1 : labelStep;
+			for (let tick = 0; tick <= windowSeconds; tick += lineStep) {
+				// Live: `tick` seconds ago · recorded file: `tick` seconds from the start.
+				const isLabelled = tick % labelStep === 0;
+				const gx = Math.round(x(fromStart ? tStart + tick : tEnd - tick)) + 0.5;
+				ctx.globalAlpha = isLabelled ? 1 : 0.4;
 				ctx.beginPath();
 				ctx.moveTo(gx, PAD.top);
 				ctx.lineTo(gx, PAD.top + plotH);
 				ctx.stroke();
 				ctx.globalAlpha = 1;
-				if (ago % 5 === 0) ctx.fillText(ago === 0 ? "now" : `-${ago} s`, gx, PAD.top + plotH + 6);
+				if (isLabelled)
+					ctx.fillText(
+						fromStart ? `${tick} s`
+						: tick === 0 ? "now"
+						: `-${tick} s`,
+						gx,
+						PAD.top + plotH + 6
+					);
 			}
 
 			if (thresholdKg !== undefined) {
@@ -180,7 +195,7 @@ export default function ForceGraph({
 
 		rafId = requestAnimationFrame(draw);
 		return () => cancelAnimationFrame(rafId);
-	}, [samplesRef, windowSeconds, unit, thresholdKg]);
+	}, [samplesRef, windowSeconds, unit, thresholdKg, fromStart]);
 
 	return <canvas className={cn("block h-72 w-full", className)} ref={canvasRef} />;
 }

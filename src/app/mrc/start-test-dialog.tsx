@@ -48,8 +48,7 @@ const writeLastPatient = (id: string) => {
 
 const formatDate = (iso: string) => new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" });
 
-// Popup shown before a test starts: test name + existing or new patient.
-// Names can be in any language (e.g. Thai) and may repeat.
+// Popup shown before a realtime test starts: test name + existing or new patient.
 export default function StartTestDialog({
 	request,
 	manual,
@@ -60,7 +59,49 @@ export default function StartTestDialog({
 	onClose: () => void;
 }) {
 	const router = useRouter();
-	const [testName, setTestName] = useState(request.title);
+	return (
+		<PatientDialog
+			title="Start test"
+			description={`${request.title} · ${manual ? "Without force" : "With force device"}`}
+			defaultName={request.title}
+			submitLabel="Start test"
+			submitIcon={PlayIcon}
+			onClose={onClose}
+			onSubmit={async (patientId, testName) => {
+				// Nothing is saved yet: the session file is created by the first repetition.
+				const session = await prepareSession({
+					patientId,
+					name: testName,
+					mode: manual ? "manual" : "force",
+					sequence: request.sequence,
+				});
+				router.push(mrcTestHref(request.testId, { sequence: request.sequence, manual, session }));
+			}}
+		/>
+	);
+}
+
+// Test name + existing or new patient, then `onSubmit` (start a test, save a video result, …).
+// Names can be in any language (e.g. Thai) and may repeat. While `onSubmit` runs the
+// dialog stays open; if it throws, its message is shown and the user can retry.
+export function PatientDialog({
+	title,
+	description,
+	defaultName,
+	submitLabel,
+	submitIcon: SubmitIcon,
+	onSubmit,
+	onClose,
+}: {
+	title: string;
+	description: string;
+	defaultName: string;
+	submitLabel: string;
+	submitIcon: typeof PlayIcon;
+	onSubmit: (patientId: string, testName: string) => Promise<void>;
+	onClose: () => void;
+}) {
+	const [testName, setTestName] = useState(defaultName);
 	const [tab, setTab] = useState<"existing" | "new">("existing");
 
 	const [patients, setPatients] = useState<Patient[] | null>(null);
@@ -109,17 +150,9 @@ export default function StartTestDialog({
 			}
 			if (!id) throw new Error("Choose a patient.");
 			writeLastPatient(id);
-
-			// Nothing is saved yet: the session file is created by the first repetition.
-			const session = await prepareSession({
-				patientId: id,
-				name: testName,
-				mode: manual ? "manual" : "force",
-				sequence: request.sequence,
-			});
-			router.push(mrcTestHref(request.testId, { sequence: request.sequence, manual, session }));
+			await onSubmit(id, testName);
 		} catch (err) {
-			setError(err instanceof Error ? err.message : "Could not start the test.");
+			setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
 			setIsSubmitting(false);
 		}
 	};
@@ -129,10 +162,8 @@ export default function StartTestDialog({
 			<DialogContent className="sm:max-w-lg">
 				<form className="flex flex-col gap-5" onSubmit={start}>
 					<DialogHeader>
-						<DialogTitle>Start test</DialogTitle>
-						<DialogDescription>
-							{request.title} · {manual ? "Without force" : "With force device"}
-						</DialogDescription>
+						<DialogTitle>{title}</DialogTitle>
+						<DialogDescription>{description}</DialogDescription>
 					</DialogHeader>
 
 					<div className="flex flex-col gap-2">
@@ -243,8 +274,8 @@ export default function StartTestDialog({
 						<Button type="submit" disabled={!canStart}>
 							{isSubmitting ?
 								<Loader2Icon className="animate-spin" />
-							:	<PlayIcon />}
-							Start test
+							:	<SubmitIcon />}
+							{submitLabel}
 						</Button>
 					</DialogFooter>
 				</form>

@@ -79,6 +79,7 @@ export default async function PageMRCSession({ params }: PageProps<"/mrc/session
 					<span className="text-foreground font-medium">{patient ? patient.name : "Unknown patient"}</span>
 					{patient?.hn && <> · HN {patient.hn}</>} ·{formatDateTime(session.startedAt)} ·{" "}
 					{session.mode === "manual" ? "Without force" : "With force device"}
+					{session.source === "video" && ` · From video${session.videoName ? ` (${session.videoName})` : ""}`}
 					{session.sequence && " · Full test"}
 				</p>
 			</div>

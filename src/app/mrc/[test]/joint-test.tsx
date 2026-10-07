@@ -20,7 +20,7 @@ import {
 import Link from "next/link";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 
-import type { RepForce, RepResult, SessionDraft } from "@/lib/storage/types";
+import type { RepForce, SessionDraft } from "@/lib/storage/types";
 
 import { completeTest, removeLastRep, resetTest, saveRep } from "@/app/mrc/actions";
 import CameraView from "@/components/camera/camera-view";
@@ -37,15 +37,15 @@ import {
 	checkDevicePlacement,
 	DevicePlacementCheck,
 	DeviceRecording,
-	summarizeDevice,
 	toDeviceRecordingValue,
 } from "@/lib/mrc/device";
-import { createForceRepDetector, FORCE_REP, getRepWarnings, summarizeForce } from "@/lib/mrc/force";
+import { createForceRepDetector, FORCE_REP, summarizeForce } from "@/lib/mrc/force";
 import { MRC_SIDE_LABEL, MRC_TESTS, MrcTest } from "@/lib/mrc/joints";
 import { computeMeasure, FACING_RATIO_THRESHOLD, getShoulderWidthRatio } from "@/lib/mrc/measure";
+import { buildRepResult } from "@/lib/mrc/rep";
 import { mrcSessionHref, mrcTestHref } from "@/lib/mrc/routes";
 import { buildMetrics, createMockSession, MrcRepSummary, MrcSession } from "@/lib/mrc/session";
-import { roundRecordingRow, summarizeRep } from "@/lib/mrc/summary";
+import { roundRecordingRow } from "@/lib/mrc/summary";
 
 import DeviceOverlay from "./device-overlay";
 import { DEVICE_STATUS_STYLE, DevicePositionCard, ForceCard } from "./force-cards";
@@ -179,31 +179,18 @@ export default function JointTest({
 		isRecordingRef.current = false;
 		const durationMs = push?.durationMs ?? (repStartedAt === null ? 0 : msSince(repStartedAt));
 		const force = push?.force;
-		const values = recordingRef.current;
-		const metrics = summarizeRep(test.measures, values);
 		const index = repsDone + 1;
-		let rep: RepResult = {
+		const rep = buildRepResult({
 			index,
 			startedAt: repStartedIsoRef.current,
-			durationMs: Math.round(durationMs),
-			metrics,
-			recording: { intervalMs: SAMPLE_INTERVAL_MS, values },
-		};
-		if (force) {
-			const deviceRows = deviceRowsRef.current;
-			const device =
-				markerSeenRef.current ? summarizeDevice(deviceRows) : { seenPct: 0, inPlacePct: null, assumed: true };
-			const warnings = getRepWarnings({ force, device, metrics });
-			rep = {
-				...rep,
-				recording: markerSeenRef.current ? { ...rep.recording, device: deviceRows } : rep.recording,
-				force,
-				device,
-				warnings,
-			};
-			if (warnings.length > 0)
-				setNotice({ tone: "warning", title: `Repetition ${index} — please check`, items: warnings });
-		}
+			durationMs,
+			measures: test.measures,
+			values: recordingRef.current,
+			intervalMs: SAMPLE_INTERVAL_MS,
+			push: force && { force, deviceRows: deviceRowsRef.current, markerSeen: markerSeenRef.current },
+		});
+		if (rep.warnings && rep.warnings.length > 0)
+			setNotice({ tone: "warning", title: `Repetition ${index} — please check`, items: rep.warnings });
 		setReps((prev) => [...prev, { durationMs: rep.durationMs, peakKg: force?.peakKg, warnings: rep.warnings }]);
 		setRepStartedAt(null);
 		setActivePeakKg(null);

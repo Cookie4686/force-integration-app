@@ -22,6 +22,10 @@ export type Session = {
 	startedAt: string;
 	mode: SessionMode;
 	sequence: boolean;
+	// "video": analysed from a recorded video + force file (MRC Test → Video). Missing = realtime.
+	source?: "realtime" | "video";
+	// Name of the analysed video file (video sessions only).
+	videoName?: string;
 	tests: TestResult[];
 };
 
