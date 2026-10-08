@@ -1,12 +1,13 @@
 import type { Session, SessionDraft } from "@/lib/storage/types";
 
-import { MRC_TESTS } from "./joints";
+import { MRC_TESTS, parseRepetitions } from "./joints";
 
 // URL for one MRC test. Query params:
 //   ?mode=sequence → part of the full test (moves on to the next test)
 //   ?force=off     → without force device: the doctor taps the screen to start/stop each repetition
 //   ?session=<id>&patient=<id>&name=<test name> → where results are saved (see app/mrc/actions.ts).
 //     Nothing is written until the first repetition, so these travel with the test.
+//   ?reps=<n>      → custom repetitions for every test (missing = each joint's default)
 export type MrcTestOptions = { sequence: boolean; manual: boolean; session?: SessionDraft };
 
 export const mrcTestHref = (testId: string, { sequence, manual, session }: MrcTestOptions): string => {
@@ -17,6 +18,7 @@ export const mrcTestHref = (testId: string, { sequence, manual, session }: MrcTe
 		params.set("session", session.id);
 		params.set("patient", session.patientId);
 		params.set("name", session.name);
+		if (session.repetitions !== undefined) params.set("reps", String(session.repetitions));
 	}
 	const query = params.toString();
 	return `/mrc/${testId}${query ? `?${query}` : ""}`;
@@ -29,7 +31,14 @@ export const readSessionDraft = (
 ): SessionDraft | undefined => {
 	const { session, patient, name } = query;
 	if (typeof session !== "string" || typeof patient !== "string" || typeof name !== "string") return undefined;
-	return { id: session, patientId: patient, name, mode: manual ? "manual" : "force", sequence };
+	return {
+		id: session,
+		patientId: patient,
+		name,
+		mode: manual ? "manual" : "force",
+		sequence,
+		repetitions: parseRepetitions(query.reps),
+	};
 };
 
 // "Continue" link for an unfinished record: the first test not completed yet
@@ -48,6 +57,7 @@ export const mrcContinueHref = (session: Session): string | null => {
 			name: session.name || "Untitled test",
 			mode: session.mode,
 			sequence: session.sequence,
+			repetitions: session.repetitions,
 		},
 	});
 };

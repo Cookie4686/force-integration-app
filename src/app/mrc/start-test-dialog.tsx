@@ -20,6 +20,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { getMrcTest, MAX_REPETITIONS, MIN_REPETITIONS, parseRepetitions } from "@/lib/mrc/joints";
 import { mrcTestHref } from "@/lib/mrc/routes";
 
 export type StartRequest = {
@@ -59,21 +60,24 @@ export default function StartTestDialog({
 	onClose: () => void;
 }) {
 	const router = useRouter();
+	const defaultRepetitions = request.sequence ? null : getMrcTest(request.testId)?.joint.repetitions;
 	return (
 		<PatientDialog
+			repetitionsPlaceholder={defaultRepetitions ? `Default: ${defaultRepetitions}` : "Default for each joint"}
 			title="Start test"
 			description={`${request.title} · ${manual ? "Without force" : "With force device"}`}
 			defaultName={request.title}
 			submitLabel="Start test"
 			submitIcon={PlayIcon}
 			onClose={onClose}
-			onSubmit={async (patientId, testName) => {
+			onSubmit={async (patientId, testName, repetitions) => {
 				// Nothing is saved yet: the session file is created by the first repetition.
 				const session = await prepareSession({
 					patientId,
 					name: testName,
 					mode: manual ? "manual" : "force",
 					sequence: request.sequence,
+					repetitions,
 				});
 				router.push(mrcTestHref(request.testId, { sequence: request.sequence, manual, session }));
 			}}
@@ -84,8 +88,10 @@ export default function StartTestDialog({
 // Test name + existing or new patient, then `onSubmit` (start a test, save a video result, …).
 // Names can be in any language (e.g. Thai) and may repeat. While `onSubmit` runs the
 // dialog stays open; if it throws, its message is shown and the user can retry.
+// With `repetitionsPlaceholder`, it also asks for custom repetitions (empty = the default).
 export function PatientDialog({
 	title,
+	repetitionsPlaceholder,
 	description,
 	defaultName,
 	submitLabel,
@@ -98,10 +104,15 @@ export function PatientDialog({
 	defaultName: string;
 	submitLabel: string;
 	submitIcon: typeof PlayIcon;
-	onSubmit: (patientId: string, testName: string) => Promise<void>;
+	repetitionsPlaceholder?: string;
+	onSubmit: (patientId: string, testName: string, repetitions?: number) => Promise<void>;
 	onClose: () => void;
 }) {
 	const [testName, setTestName] = useState(defaultName);
+	// Empty = use the default repetitions.
+	const [repetitionsText, setRepetitionsText] = useState("");
+	const customRepetitions = parseRepetitions(repetitionsText);
+	const isRepetitionsValid = repetitionsText.trim() === "" || customRepetitions !== undefined;
 	const [tab, setTab] = useState<"existing" | "new">("existing");
 
 	const [patients, setPatients] = useState<Patient[] | null>(null);
@@ -131,7 +142,10 @@ export function PatientDialog({
 	);
 
 	const canStart =
-		!isSubmitting && testName.trim() !== "" && (tab === "existing" ? patientId !== null : newName.trim() !== "");
+		!isSubmitting
+		&& isRepetitionsValid
+		&& testName.trim() !== ""
+		&& (tab === "existing" ? patientId !== null : newName.trim() !== "");
 
 	const start = async (event: React.FormEvent) => {
 		event.preventDefault();
@@ -150,7 +164,7 @@ export function PatientDialog({
 			}
 			if (!id) throw new Error("Choose a patient.");
 			writeLastPatient(id);
-			await onSubmit(id, testName);
+			await onSubmit(id, testName, customRepetitions);
 		} catch (err) {
 			setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
 			setIsSubmitting(false);
@@ -176,6 +190,36 @@ export function PatientDialog({
 							onChange={(event) => setTestName(event.target.value)}
 						/>
 					</div>
+
+					{repetitionsPlaceholder !== undefined && (
+						<div className="flex flex-col gap-2">
+							<Label htmlFor="start-repetitions">
+								Repetitions <span className="text-muted-foreground font-normal">(optional)</span>
+							</Label>
+							<Input
+								id="start-repetitions"
+								type="number"
+								inputMode="numeric"
+								min={MIN_REPETITIONS}
+								max={MAX_REPETITIONS}
+								step={1}
+								value={repetitionsText}
+								placeholder={repetitionsPlaceholder}
+								aria-invalid={!isRepetitionsValid}
+								onChange={(event) => setRepetitionsText(event.target.value)}
+							/>
+							<p
+								className={cn(
+									"text-xs",
+									isRepetitionsValid ? "text-muted-foreground" : "text-red-600 dark:text-red-400"
+								)}
+							>
+								{isRepetitionsValid ?
+									"Leave empty to use the default."
+								:	`Enter a whole number from ${MIN_REPETITIONS} to ${MAX_REPETITIONS}.`}
+							</p>
+						</div>
+					)}
 
 					<div className="flex flex-col gap-2">
 						<Label>Patient</Label>

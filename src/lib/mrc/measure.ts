@@ -54,11 +54,24 @@ export const computeMeasure = (measure: MrcMeasure, input: MeasureInput | null |
 	const [p0, p1] = measure.points;
 
 	if (measure.kind === "inclination") {
-		// Image space, y grows downward: straight down = 0°, horizontal = 90°, straight up = 180°.
 		const dx = (image[p1].x - image[p0].x) * input.width;
 		const dy = (image[p1].y - image[p0].y) * input.height;
 		if (dx === 0 && dy === 0) return null;
-		return (Math.atan2(Math.abs(dx), dy) * 180) / Math.PI;
+		// "Down" = along the trunk (shoulders → hips), or the camera's vertical (image y grows downward).
+		let down = { x: 0, y: 1 };
+		if ((measure.reference ?? "trunk") === "trunk") {
+			const axis = getTrunkAxis(input);
+			if (!axis) return null;
+			down = {
+				x: (axis.bottom.x - axis.top.x) * input.width,
+				y: (axis.bottom.y - axis.top.y) * input.height,
+			};
+			if (down.x === 0 && down.y === 0) return null;
+		}
+		// Angle between the segment and "down": parallel = 0°, perpendicular = 90°, opposite = 180°.
+		const cross = dx * down.y - dy * down.x;
+		const dot = dx * down.x + dy * down.y;
+		return (Math.atan2(Math.abs(cross), dot) * 180) / Math.PI;
 	}
 
 	if (measure.kind === "alignment") {
@@ -74,6 +87,29 @@ export const computeMeasure = (measure: MrcMeasure, input: MeasureInput | null |
 	// Image space: pixels, so a 16:9 frame does not squash the angle. z is ignored.
 	const pixel = (i: number): Point => ({ x: image[i].x * input.width, y: image[i].y * input.height, z: 0 });
 	return angleAt(pixel(p0), pixel(measure.vertex), pixel(p1));
+};
+
+// --- Trunk axis (reference for inclination) -----------------------------------
+
+const midpoint = (points: NormalizedLandmark[]) => ({
+	x: points.reduce((sum, p) => sum + p.x, 0) / points.length,
+	y: points.reduce((sum, p) => sum + p.y, 0) / points.length,
+});
+
+// The patient's own "vertical": centre of the shoulders (top) → centre of the hips
+// (bottom), as fractions of the frame. When one side is hidden (side view), the
+// visible landmark of that pair is used alone. Null when a pair is not visible at all.
+export const getTrunkAxis = (
+	input: MeasureInput | null | undefined
+): { top: { x: number; y: number }; bottom: { x: number; y: number } } | null => {
+	const image = input?.landmarks;
+	if (!image) return null;
+	const visible = (indices: number[]) =>
+		indices.map((i) => image[i]).filter((p) => p !== undefined && p.visibility >= MIN_MEASURE_VISIBILITY);
+	const shoulders = visible([11, 12]);
+	const hips = visible([23, 24]);
+	if (shoulders.length === 0 || hips.length === 0) return null;
+	return { top: midpoint(shoulders), bottom: midpoint(hips) };
 };
 
 // --- Camera view check ---------------------------------------------------------

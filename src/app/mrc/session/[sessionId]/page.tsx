@@ -97,7 +97,9 @@ export default async function PageMRCSession({ params }: PageProps<"/mrc/session
 							<div className="flex items-center gap-2">
 								<span className="text-muted-foreground text-sm">
 									{test.reps.length}
-									{config && ` / ${config.joint.repetitions}`} repetitions
+									{(test.repetitions ?? config?.joint.repetitions) !== undefined
+										&& ` / ${test.repetitions ?? config?.joint.repetitions}`}{" "}
+									repetitions
 								</span>
 								<Badge className={test.status === "completed" ? "bg-green-600 text-white" : "bg-amber-500 text-white"}>
 									{test.status === "completed" ? "Completed" : "Incomplete"}

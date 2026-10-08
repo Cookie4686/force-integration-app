@@ -21,11 +21,19 @@ import type { HhdSample } from "@/lib/hhd/protocol";
 import ForceGraph from "@/components/force/force-graph";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { ForceRecording, forceRecordingToJson, parseForceRecording, simulateForceRecording } from "@/lib/hhd/recording";
 import { FORCE_REP } from "@/lib/mrc/force";
-import { getMrcTest, MRC_SIDE_LABEL, MRC_TESTS } from "@/lib/mrc/joints";
+import {
+	getMrcTest,
+	MAX_REPETITIONS,
+	MIN_REPETITIONS,
+	MRC_SIDE_LABEL,
+	MRC_TESTS,
+	parseRepetitions,
+} from "@/lib/mrc/joints";
 
 import VideoAnalysis from "./video-analysis";
 
@@ -109,6 +117,11 @@ export default function PageMRCVideo() {
 	// --- 3. Test
 	const [testId, setTestId] = useState(MRC_TESTS[0].id);
 	const test = getMrcTest(testId) ?? MRC_TESTS[0];
+	// Empty = the joint's default repetitions.
+	const [repetitionsText, setRepetitionsText] = useState("");
+	const customRepetitions = parseRepetitions(repetitionsText);
+	const isRepetitionsValid = repetitionsText.trim() === "" || customRepetitions !== undefined;
+	const repetitions = customRepetitions ?? test.joint.repetitions;
 
 	// Demo: force data as long as the video, with one push per repetition of the chosen test.
 	const simulateForce = () => {
@@ -116,7 +129,7 @@ export default function PageMRCVideo() {
 		++forceReadRef.current;
 		setForceError(null);
 		setForceSource({ name: "Simulated force data", sizeBytes: null, simulated: true });
-		setRecording(simulateForceRecording(videoInfo.durationS * 1000, test.joint.repetitions));
+		setRecording(simulateForceRecording(videoInfo.durationS * 1000, repetitions));
 	};
 
 	const isVideoReady = videoInfo !== null;
@@ -150,6 +163,8 @@ export default function PageMRCVideo() {
 					videoUrl={videoUrl}
 					videoName={videoFile.name}
 					recording={force}
+					repetitions={repetitions}
+					customRepetitions={customRepetitions}
 					onRestart={() => setAnalysisKey((key) => (key ?? 0) + 1)}
 				/>
 			</div>
@@ -277,7 +292,7 @@ export default function PageMRCVideo() {
 									</Button>
 									<span className="text-muted-foreground text-xs">
 										{isVideoReady ?
-											`Demo: ${test.joint.repetitions} pushes spread over the video.`
+											`Demo: ${repetitions} pushes spread over the video.`
 										:	"Load the video first — the simulated data matches its length."}
 									</span>
 								</div>
@@ -305,10 +320,35 @@ export default function PageMRCVideo() {
 						<NativeSelect id="video-test" value={testId} onChange={(event) => setTestId(event.target.value)}>
 							{MRC_TESTS.map((item) => (
 								<NativeSelectOption key={item.id} value={item.id}>
-									{MRC_SIDE_LABEL[item.side]} {item.joint.name} ({item.joint.repetitions} repetitions)
+									{MRC_SIDE_LABEL[item.side]} {item.joint.name} (default {item.joint.repetitions} repetitions)
 								</NativeSelectOption>
 							))}
 						</NativeSelect>
+					</div>
+					<div className="flex flex-col gap-2">
+						<Label htmlFor="video-repetitions">
+							Repetitions <span className="text-muted-foreground font-normal">(optional)</span>
+						</Label>
+						<Input
+							className="w-48"
+							id="video-repetitions"
+							type="number"
+							inputMode="numeric"
+							min={MIN_REPETITIONS}
+							max={MAX_REPETITIONS}
+							step={1}
+							value={repetitionsText}
+							placeholder={`Default: ${test.joint.repetitions}`}
+							aria-invalid={!isRepetitionsValid}
+							onChange={(event) => setRepetitionsText(event.target.value)}
+						/>
+						<p
+							className={cn("text-xs", isRepetitionsValid ? "text-muted-foreground" : "text-red-600 dark:text-red-400")}
+						>
+							{isRepetitionsValid ?
+								"Leave empty to use the default."
+							:	`Enter a whole number from ${MIN_REPETITIONS} to ${MAX_REPETITIONS}.`}
+						</p>
 					</div>
 					<ul className="flex flex-col gap-1.5 text-sm">
 						<Requirement done={isVideoReady}>Video loaded</Requirement>
@@ -324,7 +364,7 @@ export default function PageMRCVideo() {
 					<Button
 						className="self-start"
 						size="lg"
-						disabled={!isVideoReady || !isForceReady}
+						disabled={!isVideoReady || !isForceReady || !isRepetitionsValid}
 						onClick={() => setAnalysisKey(0)}
 					>
 						<PlayIcon />

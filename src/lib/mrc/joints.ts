@@ -37,15 +37,22 @@ export type MrcAlignmentMeasure = {
 	tolerance: number;
 };
 
-// Tilt of the line points[0]→points[1] against straight down (gravity), in the
-// camera picture. Degrees: 0 = hanging down, 90 = horizontal, 180 = straight up.
-// Needs only two landmarks — no unstable reference point like the hip — but the
-// camera must be level (not tilted).
+// Tilt of the line points[0]→points[1] against the patient's trunk, in the camera
+// picture. The trunk line runs from the centre of both shoulders (11, 12) to the
+// centre of both hips (23, 24) and points "down".
+// Degrees: 0 = parallel to the trunk, pointing toward the hips (arm hanging down),
+// 90 = perpendicular to the trunk (arm out), 180 = pointing up past the head.
+// Following the body instead of the camera means a tilted camera or a leaning
+// patient does not change the value.
 export type MrcInclinationMeasure = {
 	kind: "inclination";
 	points: [PoseLandmarkIndex, PoseLandmarkIndex];
 	target: number;
 	tolerance: number;
+	// "trunk" (default): shoulder centre → hip centre is "down", as described above.
+	// "vertical": the camera picture's straight down (needs a level camera) — e.g. to
+	//   check that the trunk itself is upright, which "trunk" cannot measure.
+	reference?: "trunk" | "vertical";
 };
 
 export type MrcMeasure = MrcAngleMeasure | MrcAlignmentMeasure | MrcInclinationMeasure;
@@ -86,8 +93,8 @@ export const MRC_JOINTS: MrcJoint[] = [
 				target: 180,
 				tolerance: 10,
 			},
-			// Arm horizontal: tilt of the upper arm, right shoulder (12) → right elbow (14), from vertical.
-			// Arm hanging down = 0°, horizontal = 90°. (Not the hip: its landmark is unstable.)
+			// Arm out at 90° to the body: tilt of the upper arm, right shoulder (12) → right elbow (14),
+			// against the trunk line. Arm hanging down = 0°, perpendicular to the trunk = 90°.
 			{
 				kind: "inclination",
 				points: [POSE.rightShoulder, POSE.rightElbow],
@@ -162,6 +169,18 @@ export const MRC_JOINTS: MrcJoint[] = [
 	},
 ];
 
+// Repetitions the user may enter instead of a joint's default (`repetitions` above).
+export const MIN_REPETITIONS = 1;
+export const MAX_REPETITIONS = 30;
+
+// A valid custom repetition count, or undefined (empty / invalid → use each joint's default).
+export const parseRepetitions = (value: unknown): number | undefined => {
+	const count = typeof value === "string" && value.trim() !== "" ? Number(value) : value;
+	return Number.isInteger(count) && (count as number) >= MIN_REPETITIONS && (count as number) <= MAX_REPETITIONS ?
+			(count as number)
+		:	undefined;
+};
+
 export const getMrcJoint = (id: string): MrcJoint | undefined => MRC_JOINTS.find((joint) => joint.id === id);
 
 // --- Force device position ------------------------------------------------------
@@ -213,7 +232,8 @@ export const getMeasureVertex = (measure: MrcMeasure): PoseLandmarkIndex | null 
 export const getMeasureLabel = (measure: MrcMeasure): string => {
 	const name = (i: PoseLandmarkIndex) => POSE_LANDMARK_NAMES[i];
 	if (measure.kind === "angle") return `Angle of ${name(measure.vertex)}`;
-	if (measure.kind === "inclination") return `Angle of ${name(measure.points[0])} (from vertical)`;
+	if (measure.kind === "inclination")
+		return `Angle of ${name(measure.points[0])} (from ${measure.reference === "vertical" ? "vertical" : "trunk"})`;
 	return `Alignment of ${name(measure.points[0])} and ${name(measure.points[1])}`;
 };
 

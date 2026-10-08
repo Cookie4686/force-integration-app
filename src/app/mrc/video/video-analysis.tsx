@@ -65,9 +65,14 @@ export default function VideoAnalysis({
 	videoUrl,
 	videoName,
 	recording,
+	repetitions,
+	customRepetitions,
 	onRestart,
 }: {
 	test: MrcTest;
+	// Repetitions needed (custom or the joint's default) and the custom value alone, if any.
+	repetitions: number;
+	customRepetitions: number | undefined;
 	videoUrl: string;
 	videoName: string;
 	recording: ForceRecording;
@@ -104,7 +109,7 @@ export default function VideoAnalysis({
 	// Until the device marker is seen once, its position is assumed correct (as in the realtime test).
 	const markerSeenRef = useRef(false);
 
-	const isFinished = reps.length >= joint.repetitions;
+	const isFinished = reps.length >= repetitions;
 
 	// Start playing once the pose model is ready, so no frame is missed.
 	useEffect(() => {
@@ -171,7 +176,7 @@ export default function VideoAnalysis({
 			const event = detector.push(sample);
 			if (event === null) continue;
 			if (event.type === "start") {
-				if (count >= joint.repetitions) continue;
+				if (count >= repetitions) continue;
 				recordingRef.current = [];
 				deviceRowsRef.current = [];
 				isRecordingRef.current = true;
@@ -229,7 +234,14 @@ export default function VideoAnalysis({
 	};
 
 	const save = async (patientId: string, testName: string) => {
-		const id = await saveVideoSession({ patientId, name: testName, testId: test.id, videoName, reps });
+		const id = await saveVideoSession({
+			patientId,
+			name: testName,
+			testId: test.id,
+			videoName,
+			repetitions: customRepetitions,
+			reps,
+		});
 		router.push(mrcSessionHref(id));
 	};
 
@@ -239,7 +251,7 @@ export default function VideoAnalysis({
 	const shownSession: MrcSession = {
 		...mockSession,
 		repetitionsDone: reps.length,
-		progress: reps.length / joint.repetitions,
+		progress: reps.length / repetitions,
 		status:
 			isFinished || phase === "done" ? "finished"
 			: phase === "paused" ? "paused"
@@ -293,7 +305,7 @@ export default function VideoAnalysis({
 					<div className="pointer-events-none absolute top-3 left-3 rounded-lg bg-black/60 px-4 py-2 text-white">
 						<span className="text-xs tracking-wider text-white/70 uppercase">Repetition</span>
 						<p className="text-3xl font-bold tabular-nums">
-							{reps.length} / {joint.repetitions}
+							{reps.length} / {repetitions}
 						</p>
 					</div>
 					{activeRep && (
@@ -325,7 +337,7 @@ export default function VideoAnalysis({
 						{phase === "done" ?
 							<>
 								<CircleCheckIcon className="size-5" />
-								Analysis complete — {reps.length} of {joint.repetitions} repetitions found
+								Analysis complete — {reps.length} of {repetitions} repetitions found
 							</>
 						: activeRep ?
 							<>
@@ -336,7 +348,7 @@ export default function VideoAnalysis({
 						: isFinished ?
 							<>
 								<CircleCheckIcon className="size-5" />
-								All {joint.repetitions} repetitions found
+								All {repetitions} repetitions found
 							</>
 						:	<>
 								<HandIcon className="size-5" />
@@ -424,7 +436,7 @@ export default function VideoAnalysis({
 			<div className="flex flex-col gap-4">
 				<SessionCard
 					session={shownSession}
-					repetitions={joint.repetitions}
+					repetitions={repetitions}
 					reps={reps.map((rep) => ({ durationMs: rep.durationMs, peakKg: rep.force?.peakKg, warnings: rep.warnings }))}
 				/>
 				<DevicePositionCard

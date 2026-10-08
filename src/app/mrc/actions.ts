@@ -7,7 +7,7 @@
 
 import type { Patient, RepForce, RepResult, Session, SessionDraft, SessionMode, TestResult } from "@/lib/storage/types";
 
-import { getMeasureLabel, getMrcTest } from "@/lib/mrc/joints";
+import { getMeasureLabel, getMrcTest, MAX_REPETITIONS, MIN_REPETITIONS, parseRepetitions } from "@/lib/mrc/joints";
 import { addPatient, isValidId, newId, readPatients, updateExistingSession, upsertSession } from "@/lib/storage/files";
 
 const MAX_TEXT = 100;
@@ -113,6 +113,15 @@ const assertPatientExists = async (patientId: unknown) => {
 	if (!(await readPatients()).some((patient) => patient.id === patientId)) throw new Error("Patient not found.");
 };
 
+// Custom repetitions: empty → undefined (each joint's default); anything else must be valid.
+const cleanRepetitions = (value: unknown): number | undefined => {
+	if (value === undefined || value === null || value === "") return undefined;
+	const repetitions = parseRepetitions(value);
+	if (repetitions === undefined)
+		throw new Error(`Repetitions must be a whole number from ${MIN_REPETITIONS} to ${MAX_REPETITIONS}.`);
+	return repetitions;
+};
+
 // Checks the patient and test name and reserves a session id. Writes NOTHING —
 // the session file is created by the first saveRep.
 export async function prepareSession(input: {
@@ -121,8 +130,11 @@ export async function prepareSession(input: {
 	name: string;
 	mode: SessionMode;
 	sequence: boolean;
+	// Custom repetitions for every test; missing = each joint's default.
+	repetitions?: number;
 }): Promise<SessionDraft> {
 	const name = cleanSessionName(input?.name);
+	const repetitions = cleanRepetitions(input?.repetitions);
 	await assertPatientExists(input?.patientId);
 	return {
 		id: newId(),
@@ -130,11 +142,13 @@ export async function prepareSession(input: {
 		name,
 		mode: input.mode === "force" ? "force" : "manual",
 		sequence: Boolean(input.sequence),
+		...(repetitions !== undefined && { repetitions }),
 	};
 }
 
 // A fresh test entry. The measure targets come from the server's own config, not the client.
-const newTestResult = (testId: string): TestResult => {
+// `repetitions`: the custom count, if any (otherwise the joint's default).
+const newTestResult = (testId: string, repetitions?: number): TestResult => {
 	const test = getMrcTest(testId);
 	if (!test) throw new Error("Unknown test.");
 	return {
@@ -144,6 +158,7 @@ const newTestResult = (testId: string): TestResult => {
 		startedAt: new Date().toISOString(),
 		finishedAt: null,
 		status: "in-progress",
+		repetitions: repetitions ?? test.joint.repetitions,
 		measures: test.measures.map((measure) => ({
 			label: getMeasureLabel(measure),
 			kind: measure.kind,
@@ -158,8 +173,9 @@ const newTestResult = (testId: string): TestResult => {
 // added after the test's earlier reps (the test page loads those when reopened).
 export async function saveRep(draft: SessionDraft, testId: string, rep: RepResult): Promise<void> {
 	const name = cleanSessionName(draft?.name);
+	const repetitions = cleanRepetitions(draft?.repetitions);
 	await assertPatientExists(draft?.patientId);
-	const fresh = newTestResult(testId); // also rejects an unknown test
+	const fresh = newTestResult(testId, repetitions); // also rejects an unknown test
 	assertRep(rep, fresh.measures.length);
 
 	await upsertSession(
@@ -171,6 +187,7 @@ export async function saveRep(draft: SessionDraft, testId: string, rep: RepResul
 			startedAt: new Date().toISOString(),
 			mode: draft.mode === "force" ? "force" : "manual",
 			sequence: Boolean(draft.sequence),
+			...(repetitions !== undefined && { repetitions }),
 			tests: [],
 		}),
 		(session) => {
@@ -193,12 +210,15 @@ export async function saveVideoSession(input: {
 	name: string;
 	testId: string;
 	videoName: string;
+	// Custom repetitions; missing = the joint's default.
+	repetitions?: number;
 	reps: RepResult[];
 }): Promise<string> {
 	const name = cleanSessionName(input?.name);
+	const custom = cleanRepetitions(input?.repetitions);
 	await assertPatientExists(input?.patientId);
-	const test = newTestResult(input?.testId); // also rejects an unknown test
-	const repetitions = getMrcTest(input.testId)?.joint.repetitions ?? 0;
+	const test = newTestResult(input?.testId, custom); // also rejects an unknown test
+	const repetitions = test.repetitions ?? 0;
 	if (!Array.isArray(input.reps) || input.reps.length === 0 || input.reps.length > repetitions)
 		throw new Error("Invalid repetition data.");
 	for (const rep of input.reps) assertRep(rep, test.measures.length);
@@ -219,6 +239,7 @@ export async function saveVideoSession(input: {
 			startedAt: now,
 			mode: "force",
 			sequence: false,
+			...(custom !== undefined && { repetitions: custom }),
 			source: "video",
 			videoName: cleanText(input.videoName).slice(0, 200),
 			tests: [test],

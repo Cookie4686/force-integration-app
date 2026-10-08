@@ -22,6 +22,8 @@ export type Session = {
 	startedAt: string;
 	mode: SessionMode;
 	sequence: boolean;
+	// Custom repetitions for every test in the session (missing = each joint's default).
+	repetitions?: number;
 	// "video": analysed from a recorded video + force file (MRC Test → Video). Missing = realtime.
 	source?: "realtime" | "video";
 	// Name of the analysed video file (video sessions only).
@@ -37,6 +39,8 @@ export type SessionDraft = {
 	name: string;
 	mode: SessionMode;
 	sequence: boolean;
+	// Custom repetitions for every test (missing = each joint's default).
+	repetitions?: number;
 };
 
 // Copied from the joint config when the test starts, so later config changes
@@ -55,6 +59,8 @@ export type TestResult = {
 	startedAt: string;
 	finishedAt: string | null;
 	status: "in-progress" | "completed";
+	// Repetitions this test needed (custom or the joint's default). Older sessions: missing = the joint's default.
+	repetitions?: number;
 	measures: MeasureSnapshot[];
 	reps: RepResult[];
 };

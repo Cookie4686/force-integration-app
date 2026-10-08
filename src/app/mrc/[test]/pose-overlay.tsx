@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 
 import { PoseFrame } from "@/hooks/use-pose-stream";
 import { getMeasureVertex, MrcMeasure } from "@/lib/mrc/joints";
-import { computeMeasure, MIN_MEASURE_VISIBILITY } from "@/lib/mrc/measure";
+import { computeMeasure, getTrunkAxis, MIN_MEASURE_VISIBILITY } from "@/lib/mrc/measure";
 import { getMetricLevel, METRIC_UNIT, MrcStatusLevel } from "@/lib/mrc/session";
 import { POSE_CONNECTIONS } from "@/lib/pose/landmarks";
 
@@ -127,15 +127,33 @@ export default function PoseOverlay({
 				} else if (measure.kind === "inclination") {
 					const [from, to] = measure.points;
 					line(from, to);
-					// Dashed vertical reference (straight down), same length as the segment.
+					// "Down" on screen: along the trunk (shoulder centre → hip centre), or straight down.
+					const axis = measure.reference === "vertical" ? null : getTrunkAxis(frame);
+					if (measure.reference !== "vertical" && !axis) continue;
+					const toScreen = (p: { x: number; y: number }) => ({
+						x: offsetX + p.x * frame.width * scale,
+						y: offsetY + p.y * frame.height * scale,
+					});
+					const top = axis && toScreen(axis.top);
+					const bottom = axis && toScreen(axis.bottom);
+					const down = top && bottom ? { x: bottom.x - top.x, y: bottom.y - top.y } : { x: 0, y: 1 };
+					const downLength = Math.hypot(down.x, down.y) || 1;
 					const length = Math.hypot(px(to) - px(from), py(to) - py(from));
 					ctx.save();
 					ctx.lineWidth = 2;
 					ctx.strokeStyle = COLOR.ring;
 					ctx.setLineDash([6, 6]);
+					// The trunk line itself.
+					if (top && bottom) {
+						ctx.beginPath();
+						ctx.moveTo(top.x, top.y);
+						ctx.lineTo(bottom.x, bottom.y);
+						ctx.stroke();
+					}
+					// Reference from the measured joint, parallel to "down", same length as the segment.
 					ctx.beginPath();
 					ctx.moveTo(px(from), py(from));
-					ctx.lineTo(px(from), py(from) + length);
+					ctx.lineTo(px(from) + (down.x / downLength) * length, py(from) + (down.y / downLength) * length);
 					ctx.stroke();
 					ctx.restore();
 				} else {

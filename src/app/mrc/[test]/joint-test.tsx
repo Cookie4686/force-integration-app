@@ -83,6 +83,7 @@ export default function JointTest({
 	nextTest,
 	session: sessionDraft,
 	savedReps = [],
+	repetitions,
 }: {
 	test: MrcTest;
 	isSequence: boolean;
@@ -92,6 +93,8 @@ export default function JointTest({
 	session?: SessionDraft;
 	// Reps of this test already saved in the session (continuing a record); counting resumes after them.
 	savedReps?: MrcRepSummary[];
+	// Repetitions needed for this test (custom or the joint's default).
+	repetitions: number;
 }) {
 	const { joint } = test;
 	// TODO: replace the mock form status / recommendations with live data.
@@ -109,7 +112,7 @@ export default function JointTest({
 	const [notice, setNotice] = useState<Notice | null>(null);
 	const repsDone = reps.length;
 	const isRepActive = repStartedAt !== null;
-	const isFinished = repsDone >= joint.repetitions;
+	const isFinished = repsDone >= repetitions;
 
 	// Tick the on-screen timer while a repetition is being recorded.
 	useEffect(() => {
@@ -195,7 +198,7 @@ export default function JointTest({
 		setRepStartedAt(null);
 		setActivePeakKg(null);
 		persist((draft) => saveRep(draft, test.id, rep));
-		if (index >= joint.repetitions) persist((draft) => completeTest(draft.id, test.id));
+		if (index >= repetitions) persist((draft) => completeTest(draft.id, test.id));
 	};
 
 	// Manual mode: tap to start, tap again to stop.
@@ -346,7 +349,7 @@ export default function JointTest({
 	const shownSession: MrcSession = {
 		...mockSession,
 		repetitionsDone: repsDone,
-		progress: repsDone / joint.repetitions,
+		progress: repsDone / repetitions,
 		status:
 			isFinished ? "finished"
 			: isRepActive || repsDone > 0 ? "running"
@@ -494,7 +497,7 @@ export default function JointTest({
 						<div className="pointer-events-none absolute top-12 left-3 rounded-lg bg-black/60 px-4 py-2 text-white">
 							<span className="text-xs tracking-wider text-white/70 uppercase">Repetition</span>
 							<p className="text-3xl font-bold tabular-nums">
-								{repsDone} / {joint.repetitions}
+								{repsDone} / {repetitions}
 							</p>
 						</div>
 
@@ -513,7 +516,7 @@ export default function JointTest({
 							{isFinished ?
 								<>
 									<CircleCheckIcon className="size-5" />
-									Test complete — all {joint.repetitions} repetitions done
+									Test complete — all {repetitions} repetitions done
 								</>
 							: isRepActive ?
 								<>
@@ -613,7 +616,7 @@ export default function JointTest({
 
 				{/* Right: session information */}
 				<div className="flex flex-col gap-4">
-					<SessionCard session={shownSession} repetitions={joint.repetitions} reps={reps} />
+					<SessionCard session={shownSession} repetitions={repetitions} reps={reps} />
 					{!isManual && (
 						<DevicePositionCard
 							placement={test.device}

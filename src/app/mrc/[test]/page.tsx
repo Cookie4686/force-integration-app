@@ -40,6 +40,8 @@ export default async function PageMRCTest({ params, searchParams }: PageProps<"/
 			nextTest={nextTest}
 			session={session}
 			savedReps={savedReps}
+			// Custom repetitions from the start popup, else the joint's default.
+			repetitions={session?.repetitions ?? test.joint.repetitions}
 		/>
 	);
 }
