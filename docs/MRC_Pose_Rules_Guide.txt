@@ -1,0 +1,383 @@
+MRC POSE RULES — HOW TO WRITE AND EDIT THEM
+===========================================
+
+PURPOSE OF THIS FILE
+--------------------
+This file explains the pose-checking rules of the MRC (muscle strength) test so
+that another team (or another AI) can read, edit and add rules without help.
+
+All rules live in ONE file:
+
+    src/lib/mrc/joints.ts      -> MRC_JOINTS           (posture rules per joint)
+                               -> MRC_DEVICE_PLACEMENT (where the force device must be)
+
+Normally you only edit those two constants. Everything else (the live camera
+overlay, the dashboard, the saved results, the left-side tests) is generated
+from them automatically.
+
+Related files (read-only for rule writers, useful to understand behaviour):
+
+    src/lib/pose/landmarks.ts  -> POSE (landmark names -> numbers), POSE_MIRROR
+    src/lib/mrc/measure.ts     -> how each rule is turned into a live number
+    src/lib/mrc/session.ts     -> how a number is graded good / warning / bad
+    src/lib/mrc/summary.ts     -> how a repetition is summarised
+    src/lib/mrc/force.ts       -> warnings added to a repetition (REP_WARNING)
+    src/lib/mrc/device.ts      -> how the force device position is checked
+
+
+1. THE BIG PICTURE
+------------------
+- The camera video goes through MediaPipe Pose, which returns 33 body points
+  ("landmarks") per frame, e.g. right shoulder, right elbow, right wrist.
+- Each joint test (shoulder, elbow, ...) has a list of "measures". A measure is
+  one geometric rule built from landmarks, e.g. "the angle at the right elbow
+  should be 180 degrees, +/- 10".
+- Every frame, each measure is computed and shown to the doctor with a colour:
+      good    = |value - target| <= tolerance
+      warning = |value - target| <= 2 x tolerance
+      bad     = further than that
+      unknown = a landmark it needs is not visible (visibility < 0.5)
+- After each repetition, every measure is summarised (min, max, mean,
+  % of frames in tolerance). If a measure is "good" in fewer than 50% of the
+  frames of a push, the repetition gets a warning
+  ("<label>: out of tolerance for X% of the push").
+- Measures do NOT block the test or count repetitions. They are posture
+  feedback for the doctor and quality data in the saved result.
+
+
+2. LANDMARKS (POSE)
+-------------------
+Always refer to landmarks through the POSE constant, never by raw number:
+
+    POSE.rightShoulder   (not 12)
+
+"left" / "right" are the PATIENT's left / right, not the left/right of the
+picture.
+
+Name               Index   Name               Index
+-----------------  -----   -----------------  -----
+nose                 0
+leftEyeInner         1     rightEyeInner        4
+leftEye              2     rightEye             5
+leftEyeOuter         3     rightEyeOuter        6
+leftEar              7     rightEar             8
+mouthLeft            9     mouthRight          10
+leftShoulder        11     rightShoulder       12
+leftElbow           13     rightElbow          14
+leftWrist           15     rightWrist          16
+leftPinky           17     rightPinky          18
+leftIndex           19     rightIndex          20
+leftThumb           21     rightThumb          22
+leftHip             23     rightHip            24
+leftKnee            25     rightKnee           26
+leftAnkle           27     rightAnkle          28
+leftHeel            29     rightHeel           30
+leftFootIndex       31     rightFootIndex      32   (foot index = tip of the foot / big toe area)
+
+MediaPipe reference image of the points:
+https://ai.google.dev/edge/mediapipe/solutions/vision/pose_landmarker#pose_landmarker_model
+
+
+3. GOLDEN RULE: WRITE EVERYTHING FOR THE RIGHT SIDE ONLY
+--------------------------------------------------------
+Each joint is written ONCE, using RIGHT-side landmarks (rightShoulder,
+rightElbow, rightHip, ...). The left-side test is generated automatically by
+swapping every landmark with its partner (POSE_MIRROR: 12 <-> 11, 14 <-> 13,
+...). target, tolerance, space and reference are copied unchanged.
+
+So:
+- Do NOT write a separate left-side rule.
+- Do NOT use left-side landmarks to mean "the tested limb". A left landmark in
+  a right-side rule means "the OTHER side of the body" (and becomes the right
+  side in the left test). This is only correct for cross-body rules, e.g.
+  "both hips level" in a front view.
+
+
+4. FIELDS OF ONE JOINT (MrcJoint) — one entry of MRC_JOINTS
+-----------------------------------------------------------
+
+  id            "shoulder" | "elbow" | "wrist" | "hip" | "knee" | "ankle"
+                Unique key. Used in URLs (e.g. /mrc/shoulder-right), saved
+                results and MRC_DEVICE_PLACEMENT. Do not rename an existing id
+                (old saved sessions refer to it). To add a NEW joint, also add
+                its id to the MrcJointId type AND add an entry to
+                MRC_DEVICE_PLACEMENT (TypeScript will error otherwise).
+
+  name          Display name, e.g. "Shoulder".
+
+  region        "Upper limb" | "Lower limb". Display only (badge / start page).
+
+  description   One short sentence shown on the start page, e.g.
+                "Shoulder extension." Describe the movement being tested.
+
+  repetitions   Default number of repetitions (pushes) for this joint.
+                The user can override it per test with a value from
+                MIN_REPETITIONS (1) to MAX_REPETITIONS (30).
+
+  sides         Which sides are tested, in order, e.g. ["right", "left"].
+                Use ["right"] to test the right side only. The full-test
+                sequence is: every joint in array order, each of its sides in
+                turn (shoulder R, shoulder L, elbow R, ...).
+
+  camera        Where the camera must be. The app checks this live by comparing
+                shoulder width to trunk length and warns if it is wrong.
+                  "front": patient faces the camera.
+                  "side":  the TESTED side faces the camera (patient side-on).
+                With "side", use only same-side landmarks (rightShoulder,
+                rightElbow, rightHip, ...). Never use left<->right pairs such as
+                leftShoulder<->rightShoulder: they overlap in a side view and
+                the numbers are meaningless.
+                The camera should face the PLANE OF MOVEMENT: if the limb moves
+                forward/back, use "side"; if it moves out to the side, "front".
+
+  measures      The posture rules (see section 5). An array; may mix kinds;
+                may be empty ([]) — then the test runs with no posture checks.
+                Order matters only for display order.
+
+
+5. MEASURE KINDS (MrcMeasure)
+-----------------------------
+Every measure has:
+
+  kind        "angle" | "inclination" | "alignment"  (which formula, see below)
+  target      The ideal value (degrees, or centimetres for alignment).
+  tolerance   Allowed deviation (+/-) from target that still counts as "good".
+              Up to 2 x tolerance is shown as "warning", beyond that "bad".
+              Pick it from how precise the doctor needs the posture AND how
+              noisy the camera is: 5 = strict, 10 = normal, 15+ = loose.
+
+The on-screen label is generated automatically (getMeasureLabel), e.g.
+"Angle of right elbow", "Angle of right shoulder (from trunk)",
+"Alignment of left hip and right hip". You cannot set a custom label.
+
+
+5.1  kind: "angle"  — the angle INSIDE a joint
+    -------------------------------------------
+    Fields:
+      vertex   The landmark where the angle is (the joint itself).
+      points   [A, B]: the two landmarks at the ends of the two bones.
+      target   Degrees, 0..180.
+      tolerance
+      space    Optional. "image" (default) or "world".
+
+    Value = angle at `vertex` between the lines vertex->A and vertex->B.
+      180 = fully straight (A, vertex, B in one line)
+       90 = right angle
+        0 = fully folded
+    The order of A and B does not matter.
+
+    space:
+      "image" (default, recommended): measured on the 2D camera picture —
+          what the doctor sees on screen. The camera must face the plane of
+          movement or the angle looks smaller than it is.
+      "world": 3D angle using MediaPipe's depth estimate. Independent of
+          camera direction, BUT depth is noisy: a straight arm can read
+          130-150 degrees. Avoid unless you really need it.
+
+    Example — arm straight at the elbow:
+      {
+          kind: "angle",
+          vertex: POSE.rightElbow,
+          points: [POSE.rightWrist, POSE.rightShoulder],
+          target: 180,
+          tolerance: 10,
+      },
+
+    Typical joint triplets (vertex in the middle):
+      shoulder angle : rightElbow  - rightShoulder - rightHip
+      elbow angle    : rightShoulder - rightElbow  - rightWrist
+      wrist angle    : rightElbow  - rightWrist    - rightIndex
+      hip angle      : rightShoulder - rightHip    - rightKnee
+      knee angle     : rightHip    - rightKnee     - rightAnkle
+      ankle angle    : rightKnee   - rightAnkle    - rightFootIndex
+
+
+5.2  kind: "inclination"  — the TILT of one body segment
+    -----------------------------------------------------
+    Fields:
+      points     [FROM, TO]: the segment, measured as the direction FROM -> TO.
+                 ORDER MATTERS (swapping them turns 30 into 150).
+      target     Degrees, 0..180.
+      tolerance
+      reference  Optional. "trunk" (default) or "vertical".
+
+    Value = angle between the direction FROM->TO and a "down" direction:
+        0 = pointing "down"
+       90 = perpendicular to "down"
+      180 = pointing "up"
+    It is always 0..180 (it does not tell left from right / front from back).
+
+    reference:
+      "trunk" (default): "down" = from the centre of the shoulders to the
+          centre of the hips (the patient's own body axis). A tilted camera
+          or a leaning patient does not change the value. In side view, only
+          the visible shoulder/hip is used.
+          Example: upper arm rightShoulder -> rightElbow
+             arm hanging along the body = 0, arm out horizontally = 90,
+             arm raised above the head = 180.
+      "vertical": "down" = straight down in the camera picture. Needs a level
+          camera. Use it to check the TRUNK ITSELF (e.g. "back upright"),
+          which "trunk" cannot do (see pitfall 7.3).
+
+    The angle value is drawn on screen at points[0] (the FROM landmark), so
+    put the joint the segment hangs from first (e.g. shoulder before elbow).
+
+    Example — arm out at 90 degrees to the body:
+      {
+          kind: "inclination",
+          points: [POSE.rightShoulder, POSE.rightElbow],
+          target: 90,
+          tolerance: 5,
+      },
+
+    Example — trunk upright (camera must be level):
+      {
+          kind: "inclination",
+          points: [POSE.rightShoulder, POSE.rightHip],
+          target: 0,
+          tolerance: 10,
+          reference: "vertical",
+      },
+
+
+5.3  kind: "alignment"  — DISTANCE between two landmarks
+    -----------------------------------------------------
+    Fields:
+      points     [A, B]
+      target     Centimetres.
+      tolerance  Centimetres.
+
+    Value = 3D straight-line distance between A and B in cm, from MediaPipe's
+    world (3D) landmarks. Useful for "keep the elbow against the body"
+    (elbow-to-hip distance small) or "feet together". The depth part is noisy,
+    so use generous tolerances (several cm).
+    Note: alignment is distance only — it does NOT check that points are
+    "level" or "in line". For level / in-line checks use "inclination".
+
+    Example — keep the elbow close to the body:
+      {
+          kind: "alignment",
+          points: [POSE.rightElbow, POSE.rightHip],
+          target: 20,
+          tolerance: 5,
+      },
+
+
+6. FORCE DEVICE POSITION (MRC_DEVICE_PLACEMENT)
+-----------------------------------------------
+One entry per joint id (required for every id). Also written for the RIGHT
+side; the left side is mirrored automatically. It is checked only when the
+device's printed marker is seen by the camera; if the marker is never seen
+the position is assumed correct.
+
+  { kind: "between", from, to, maxOffsetCm }
+      The device must be on the segment from -> to, past the midpoint (closer
+      to `to` than to `from`), and at most maxOffsetCm away from the line
+      from -> to (the marker is on the side of the device, so never exactly
+      on the line).
+      e.g. shoulder: { kind: "between", from: POSE.rightShoulder,
+                       to: POSE.rightElbow, maxOffsetCm: 15 }
+           = on the upper arm, near the elbow.
+
+  { kind: "near", landmark, maxDistanceCm }
+      The device must be within maxDistanceCm of `landmark`.
+      e.g. wrist: { kind: "near", landmark: POSE.rightWrist, maxDistanceCm: 10 }
+
+Centimetres here come from the marker's printed size, measured at the
+device's distance from the camera.
+
+
+7. PITFALLS (READ BEFORE WRITING A RULE)
+----------------------------------------
+7.1  Use right-side landmarks for the tested limb. Never write left rules.
+
+7.2  In a "side" camera test, do not use left<->right pairs (both shoulders,
+     both hips, ...). They overlap in the picture.
+
+7.3  An "inclination" with reference "trunk" on the trunk itself is
+     meaningless: shoulder -> hip is (almost) exactly the trunk axis, so it
+     always reads ~0 (or ~180 for hip -> shoulder) no matter how the patient
+     leans. Use reference: "vertical" to check posture of the trunk.
+
+7.4  "inclination" points order matters (FROM -> TO). "angle" points order
+     does not, but `vertex` must be the joint in the middle.
+
+7.5  Values are 0..180 and unsigned: an inclination of 30 can be 30 forward
+     or 30 backward; an angle of 150 can be bent either way. If direction
+     matters, add a second measure that distinguishes it.
+
+7.6  Feet, hands and face landmarks are less reliable than shoulders, elbows,
+     hips and knees. Prefer big joints; use looser tolerances on small ones.
+
+7.7  If any landmark of a measure has visibility < 0.5 the measure shows "--"
+     (unknown) for that frame. Make sure the camera position you choose
+     actually shows every landmark the rules use.
+
+7.8  Keep the number of measures small (1-3 per joint). Each one is a thing
+     the doctor must watch.
+
+7.9  Confirm target and tolerance values with the doctor/physiotherapist; the
+     current values are a starting point.
+
+
+8. CHECKLIST TO ADD OR EDIT A RULE
+----------------------------------
+ 1. Decide the patient posture with the doctor (what must be straight, at what
+    angle, what must not move).
+ 2. Choose camera: "side" or "front" (camera faces the plane of movement).
+ 3. For each posture requirement, pick the kind:
+      bend inside a joint       -> "angle"
+      direction of one segment  -> "inclination" (trunk, or vertical for the
+                                   trunk itself)
+      distance between points   -> "alignment"
+ 4. Write it with RIGHT-side POSE.* landmarks, target and tolerance.
+ 5. Add a short comment above each measure saying what it checks in plain
+    words, with landmark numbers, like the existing shoulder entry.
+ 6. Check MRC_DEVICE_PLACEMENT for that joint is still right.
+ 7. Type-check:  npx tsc --noEmit
+ 8. Test on camera: the values should turn green when the patient holds the
+    correct posture, and yellow/red when they do not. Test both sides.
+
+
+9. CURRENT STATE (at time of writing)
+-------------------------------------
+  shoulder  front  measures: elbow straight (angle 180 +/-10),
+                             upper arm at 90 to trunk (inclination 90 +/-5)
+  elbow     side   measures: forearm wrist->elbow at 90 to trunk
+                             (inclination 90 +/-5);
+                             hip->shoulder inclination 180 +/-10 vs trunk
+                             -> see pitfall 7.3: this always reads ~180;
+                                probably meant reference: "vertical"
+  wrist     side   measures: none yet
+  hip       side   measures: none yet
+  knee      side   measures: none yet
+  ankle     side   measures: none yet
+
+A complete joint entry, for reference:
+
+  {
+      id: "shoulder",
+      name: "Shoulder",
+      region: "Upper limb",
+      description: "Shoulder extension.",
+      repetitions: 3,
+      sides: ["right", "left"],
+      camera: "front",
+      measures: [
+          // Arm straight: angle at right elbow (14) between right wrist (16) and right shoulder (12).
+          {
+              kind: "angle",
+              vertex: POSE.rightElbow,
+              points: [POSE.rightWrist, POSE.rightShoulder],
+              target: 180,
+              tolerance: 10,
+          },
+          // Arm out at 90 degrees to the body: upper arm (12 -> 14) against the trunk line.
+          {
+              kind: "inclination",
+              points: [POSE.rightShoulder, POSE.rightElbow],
+              target: 90,
+              tolerance: 5,
+          },
+      ],
+  },
