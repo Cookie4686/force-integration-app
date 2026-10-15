@@ -79,7 +79,7 @@ export const MRC_JOINTS: MrcJoint[] = [
 		id: "shoulder",
 		name: "Shoulder",
 		region: "Upper limb",
-		description: "Shoulder extension.",
+		description: "Shoulder abduction.",
 		repetitions: 3,
 		sides: ["right", "left"],
 		camera: "front",
@@ -103,27 +103,32 @@ export const MRC_JOINTS: MrcJoint[] = [
 			},
 		],
 	},
-	// TODO: fill in measures for the remaining joints.
 	{
 		id: "elbow",
 		name: "Elbow",
 		region: "Upper limb",
-		description: "Assess the elbow joint.",
+		description: "Elbow flexion.",
 		repetitions: 5,
 		sides: ["right", "left"],
 		camera: "side",
 		measures: [
+			// Upper arm against the body: tilt of the upper arm, right shoulder (12) → right elbow (14),
+			// against the trunk line. 0° = parallel to the trunk, arm hanging down.
 			{
 				kind: "inclination",
-				points: [POSE.rightWrist, POSE.rightElbow],
-				target: 90,
-				tolerance: 5,
+				points: [POSE.rightShoulder, POSE.rightElbow],
+				target: 0,
+				tolerance: 15,
 			},
+			// Trunk upright (no leaning forward or back): right hip (24) → right shoulder (12) points
+			// straight up = 180° from the camera's "down". Must use "vertical": against the trunk itself
+			// it would always read ~180 (see pitfall 7.3). Needs a level camera.
 			{
 				kind: "inclination",
 				points: [POSE.rightHip, POSE.rightShoulder],
 				target: 180,
 				tolerance: 10,
+				reference: "vertical",
 			},
 		],
 	},
@@ -131,31 +136,89 @@ export const MRC_JOINTS: MrcJoint[] = [
 		id: "wrist",
 		name: "Wrist",
 		region: "Upper limb",
-		description: "Assess the wrist joint.",
+		description: "Wrist extension.",
 		repetitions: 5,
 		sides: ["right", "left"],
 		camera: "side",
-		measures: [],
+		measures: [
+			// Forearm resting on the support, palm down: tilt of the forearm, right elbow (14) →
+			// right wrist (16), against the trunk line. 90° = perpendicular to the trunk (horizontal
+			// when seated upright). Horizontal is an assumption — the criteria sheet only says the
+			// arm must be supported and must not move; confirm with the doctor.
+			{
+				kind: "inclination",
+				points: [POSE.rightElbow, POSE.rightWrist],
+				target: 90,
+				tolerance: 10,
+			},
+		],
 	},
 	{
 		id: "hip",
 		name: "Hip",
 		region: "Lower limb",
-		description: "Assess the hip joint.",
+		description: "Hip flexion.",
 		repetitions: 5,
 		sides: ["right", "left"],
 		camera: "side",
-		measures: [],
+		measures: [
+			// Trunk upright (no leaning forward or back): right shoulder (12) → right hip (24) points
+			// straight down in the picture = 0° from vertical. Needs a level camera.
+			{
+				kind: "inclination",
+				points: [POSE.rightShoulder, POSE.rightHip],
+				target: 0,
+				tolerance: 10,
+				reference: "vertical",
+			},
+			// Knee stays bent (leg not straightened), lower leg relaxed: angle at right knee (26)
+			// between right hip (24) and right ankle (28). Loose: the thigh is lifted, so the knee
+			// angle is a little under 90°.
+			{
+				kind: "angle",
+				vertex: POSE.rightKnee,
+				points: [POSE.rightHip, POSE.rightAnkle],
+				target: 90,
+				tolerance: 20,
+			},
+		],
 	},
 	{
 		id: "knee",
 		name: "Knee",
 		region: "Lower limb",
-		description: "Assess the knee joint.",
+		description: "Knee extension.",
 		repetitions: 5,
 		sides: ["right", "left"],
 		camera: "side",
-		measures: [],
+		measures: [
+			// Trunk upright (no leaning forward or back): right shoulder (12) → right hip (24) points
+			// straight down in the picture = 0° from vertical. Needs a level camera.
+			{
+				kind: "inclination",
+				points: [POSE.rightShoulder, POSE.rightHip],
+				target: 0,
+				tolerance: 10,
+				reference: "vertical",
+			},
+			// Thigh stays down on the seat (not lifted): tilt of the thigh, right hip (24) → right knee (26),
+			// against the trunk line. 90° = perpendicular to the trunk.
+			{
+				kind: "inclination",
+				points: [POSE.rightHip, POSE.rightKnee],
+				target: 90,
+				tolerance: 10,
+			},
+			// Leg extended: angle at right knee (26) between right hip (24) and right ankle (28).
+			// 180° = fully straight. Loose, because the knee is rarely perfectly straight on camera.
+			{
+				kind: "angle",
+				vertex: POSE.rightKnee,
+				points: [POSE.rightHip, POSE.rightAnkle],
+				target: 180,
+				tolerance: 15,
+			},
+		],
 	},
 	{
 		id: "ankle",
@@ -165,7 +228,24 @@ export const MRC_JOINTS: MrcJoint[] = [
 		repetitions: 5,
 		sides: ["right", "left"],
 		camera: "side",
-		measures: [],
+		measures: [
+			// Thigh stays down on the seat (not lifted): tilt of the thigh, right hip (24) → right knee (26),
+			// against the trunk line. 90° = perpendicular to the trunk.
+			{
+				kind: "inclination",
+				points: [POSE.rightHip, POSE.rightKnee],
+				target: 90,
+				tolerance: 10,
+			},
+			// Lower leg relaxed and not lifted: tilt of the shin, right knee (26) → right ankle (28),
+			// against the trunk line. 0° = parallel to the trunk, pointing toward the feet.
+			{
+				kind: "inclination",
+				points: [POSE.rightKnee, POSE.rightAnkle],
+				target: 0,
+				tolerance: 15,
+			},
+		],
 	},
 ];
 
